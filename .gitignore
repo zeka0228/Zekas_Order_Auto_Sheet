@@ -32,6 +32,7 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json.example
 !.vscode/extensions.json
+.claude/
 
 # Coverage
 coverage/

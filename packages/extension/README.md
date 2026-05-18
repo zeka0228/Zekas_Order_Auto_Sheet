@@ -11,7 +11,7 @@ extension/
 │   ├── popup/                 # 툴바 팝업 (React)
 │   ├── options/               # 옵션 페이지 (React)
 │   ├── checkout.content.ts    # 쇼핑몰 결제 페이지 캡처
-│   ├── checkout.injected.ts   # MAIN world 주입용 (필요 시)
+│   ├── checkout-mainworld.ts  # MAIN world 주입용 (필요 시)
 │   ├── gmail.content.ts       # Gmail 백업 파싱 (Pro)
 │   └── baedaeji.content.ts    # 배대지 폼 자동 채움
 ├── lib/

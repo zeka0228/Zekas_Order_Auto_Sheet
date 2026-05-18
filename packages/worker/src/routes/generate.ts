@@ -1,16 +1,9 @@
-import { z } from 'zod';
+import { GenerateConfigRequestSchema } from '@zoas/shared';
 import type { Env } from '../env';
 import { checkRateLimit } from '../rate-limit';
 import { validateMasking } from '../mask-validator';
 import { findBestConfig, insertConfig } from '../db';
 import { generateSelectorsWithAI } from '../ai-proxy';
-
-const Body = z.object({
-  domain: z.string().min(1),
-  type: z.enum(['shop', 'baedaeji']),
-  sanitized_html: z.string().min(1).max(500_000),
-  url_pattern: z.string().optional(),
-});
 
 export async function handleGenerate(req: Request, env: Env): Promise<Response> {
   const anonId = req.headers.get('X-Anon-Id') ?? 'anonymous';
@@ -21,7 +14,7 @@ export async function handleGenerate(req: Request, env: Env): Promise<Response> 
   if (limited) return new Response('Too Many Requests', { status: 429 });
 
   const json = await req.json().catch(() => null);
-  const parsed = Body.safeParse(json);
+  const parsed = GenerateConfigRequestSchema.safeParse(json);
   if (!parsed.success) {
     return new Response(JSON.stringify(parsed.error.issues), { status: 400 });
   }

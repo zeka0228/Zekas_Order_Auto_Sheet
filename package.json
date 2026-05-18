@@ -11,9 +11,14 @@
     "dev:ext": "pnpm --filter @zoas/extension dev",
     "build:ext": "pnpm --filter @zoas/extension build",
     "zip:ext": "pnpm --filter @zoas/extension zip",
-    "dev:api": "pnpm --filter @zoas/config-api dev",
-    "deploy:api": "pnpm --filter @zoas/config-api deploy",
+    "dev:api": "pnpm --filter @zoas/worker dev",
+    "deploy:api": "pnpm --filter @zoas/worker deploy",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
+  },
+  "pnpm": {
+    "overrides": {
+      "@vitejs/plugin-react": "^4.4.1"
+    }
   }
 }

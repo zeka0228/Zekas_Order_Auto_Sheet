@@ -1,5 +1,5 @@
 {
-  "name": "@zoas/config-api",
+  "name": "@zoas/worker",
   "version": "0.0.1",
   "private": true,
   "description": "ZOAS Cloudflare Worker — 글로벌 Config DB + AI 프록시",
@@ -14,6 +14,7 @@
     "backup": "tsx scripts/backup-to-github.ts"
   },
   "dependencies": {
+    "@zoas/shared": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -1,19 +1,9 @@
+import type { ConfigType, SiteConfig } from '@zoas/shared';
 import type { Env } from './env';
-
-export interface ConfigRow {
-  id: number;
-  type: 'shop' | 'baedaeji';
-  domain: string;
-  urlPattern: string;
-  version: number;
-  selectors: Record<string, string>;
-  language: string | null;
-  country: string | null;
-}
 
 interface RawRow {
   id: number;
-  type: 'shop' | 'baedaeji';
+  type: ConfigType;
   domain: string;
   url_pattern: string;
   version: number;
@@ -22,7 +12,7 @@ interface RawRow {
   country: string | null;
 }
 
-function toConfig(row: RawRow): ConfigRow {
+function toConfig(row: RawRow): SiteConfig {
   let selectors: Record<string, string> = {};
   try {
     const parsed = JSON.parse(row.config_json) as { selectors?: unknown };
@@ -47,8 +37,8 @@ function toConfig(row: RawRow): ConfigRow {
 export async function findBestConfig(
   env: Env,
   domain: string,
-  type: 'shop' | 'baedaeji',
-): Promise<ConfigRow | null> {
+  type: ConfigType,
+): Promise<SiteConfig | null> {
   const row = await env.DB.prepare(
     `SELECT id, type, domain, url_pattern, version, config_json, language, country
        FROM configs
@@ -64,7 +54,7 @@ export async function findBestConfig(
 export async function insertConfig(
   env: Env,
   args: {
-    type: 'shop' | 'baedaeji';
+    type: ConfigType;
     domain: string;
     urlPattern: string;
     configJson: string;
@@ -119,7 +109,7 @@ export async function recordFeedback(
     .bind(configId)
     .run();
 
-  // 임계치 도달 시 자동 invalidate
+  // 임계치 도달 시 자동 invalidate (실패율 > 50% AND use_count > 10)
   await env.DB.prepare(
     `UPDATE configs
         SET is_invalidated = 1, updated_at = CURRENT_TIMESTAMP

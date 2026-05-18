@@ -1,4 +1,4 @@
-# @zoas/config-api
+# @zoas/worker
 
 Cloudflare Worker + D1 — ZOAS의 **글로벌 Config DB**와 AI 프록시.
 
@@ -38,7 +38,7 @@ pnpm dev
 ## 디렉토리
 
 ```
-config-api/
+worker/
 ├── wrangler.toml
 ├── src/
 │   ├── index.ts             # Router
@@ -54,5 +54,5 @@ config-api/
 ├── migrations/
 │   └── 0001_init.sql
 └── scripts/
-    └── backup-to-github.ts  # 일 1회 D1 dump → GitHub
+    └── backup-to-github.ts  # 일 1회 D1 dump → GitHub (Phase 5)
 ```
