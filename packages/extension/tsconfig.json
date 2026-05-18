@@ -3,7 +3,6 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "types": ["chrome"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
     }
