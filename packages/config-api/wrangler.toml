@@ -1,0 +1,22 @@
+name = "zoas-config-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare D1 — 글로벌 config DB
+[[d1_databases]]
+binding = "DB"
+database_name = "zoas-configs"
+database_id = "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+migrations_dir = "migrations"
+
+# KV — rate-limit 카운터
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "PLACEHOLDER_RUN_WRANGLER_KV_CREATE"
+
+# 개발자 Anthropic 키 — `wrangler secret put ANTHROPIC_API_KEY` 로 설정
+# [vars] 에 평문으로 두지 말 것.
+
+[observability]
+enabled = true

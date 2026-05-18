@@ -1,0 +1,25 @@
+{
+  "name": "@zoas/config-api",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ZOAS Cloudflare Worker — 글로벌 Config DB + AI 프록시",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply zoas-configs --local",
+    "db:migrate:prod": "wrangler d1 migrations apply zoas-configs --remote",
+    "backup": "tsx scripts/backup-to-github.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.95.0"
+  }
+}

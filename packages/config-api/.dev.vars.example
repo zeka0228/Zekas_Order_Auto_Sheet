@@ -1,0 +1,4 @@
+# 로컬 개발용 환경 변수 예시.
+# 실 키는 절대 커밋하지 말 것 — .dev.vars 는 .gitignore 대상.
+# 운영 환경은 `wrangler secret put ANTHROPIC_API_KEY` 로 등록.
+ANTHROPIC_API_KEY="sk-ant-…"

@@ -1,0 +1,19 @@
+{
+  "name": "zekas-order-auto-sheet",
+  "version": "0.0.1",
+  "private": true,
+  "description": "해외 직구 → 배대지 주문서 자동 채움 크롬 확장 모노레포",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "dev:ext": "pnpm --filter @zoas/extension dev",
+    "build:ext": "pnpm --filter @zoas/extension build",
+    "zip:ext": "pnpm --filter @zoas/extension zip",
+    "dev:api": "pnpm --filter @zoas/config-api dev",
+    "deploy:api": "pnpm --filter @zoas/config-api deploy",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  }
+}
