@@ -81,8 +81,10 @@ pnpm --filter @zoas/worker db:migrate:prod
 ## 6. 배포
 
 ```bash
-pnpm --filter @zoas/worker deploy
+pnpm --filter @zoas/worker run deploy
 ```
+
+> `run`을 빼면 pnpm이 `deploy`를 내장 명령으로 가로채 `ERR_PNPM_INVALID_DEPLOY_TARGET`이 납니다. 스크립트 실행임을 명시하려면 `run`을 붙이세요.
 
 출력 마지막 줄에 배포 URL이 나옵니다:
 ```

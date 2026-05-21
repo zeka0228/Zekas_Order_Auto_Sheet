@@ -1,7 +1,7 @@
 import { SiteConfigSchema, type SiteConfig } from './schemas';
 import { getSettings } from './storage';
 
-const DEFAULT_BASE = 'https://config-api.example.workers.dev'; // TODO Phase 0: 실제 배포 URL
+const DEFAULT_BASE = 'https://zoas-worker.jhim0228.workers.dev'; // Phase 0 배포 URL (2026-05-21)
 
 async function baseUrl(): Promise<string> {
   return (await getSettings()).workerBaseUrl ?? DEFAULT_BASE;

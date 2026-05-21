@@ -11,14 +11,14 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "zoas-configs"
-database_id = "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+database_id = "84aad6cb-cb49-4766-8fb8-9a01d1bfa954"
 migrations_dir = "migrations"
 
 # KV — rate-limit 카운터
 # `pnpm --filter @zoas/worker exec wrangler kv namespace create RATE_LIMIT` 출력의 id 주입
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "PLACEHOLDER_RUN_WRANGLER_KV_CREATE"
+id = "e0c1892867c840408fae6383f809135b"
 
 # 개발자 Anthropic 키 — `pnpm --filter @zoas/worker exec wrangler secret put ANTHROPIC_API_KEY` 로 설정.
 # [vars] 에 평문으로 두지 말 것. 로컬 dev는 .dev.vars 사용 (.gitignore 됨).
