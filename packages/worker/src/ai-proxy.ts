@@ -25,12 +25,24 @@ trackingNumber, productName, declaredPrice, currency, quantity, productCategory.
 반드시 JSON만 출력 (코드 펜스 금지). 보이지 않는 필드는 키 자체를 생략.`,
 };
 
+/**
+ * Anthropic 호출 엔드포인트. AI Gateway 설정이 있으면 그 경유 URL을 쓴다.
+ * Cloudflare Worker가 미지원 지역(예: HKG colo)에서 직접 호출 시 Anthropic이 403으로
+ * 차단하므로(BUG-010), 지원 지역에서 나가는 AI Gateway를 경유한다. 캐싱·재시도 덤.
+ */
+function anthropicEndpoint(env: Env): string {
+  if (env.AI_GATEWAY_ACCOUNT_ID && env.AI_GATEWAY_NAME) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.AI_GATEWAY_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/anthropic/v1/messages`;
+  }
+  return 'https://api.anthropic.com/v1/messages';
+}
+
 export async function generateSelectorsWithAI(
   env: Env,
   type: 'shop' | 'baedaeji',
   sanitizedHtml: string,
 ): Promise<Record<string, string> | null> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(anthropicEndpoint(env), {
     method: 'POST',
     headers: {
       'x-api-key': env.ANTHROPIC_API_KEY,
@@ -53,8 +65,13 @@ export async function generateSelectorsWithAI(
   };
   const block = data.content?.find((b) => b.type === 'text');
   if (!block?.text) return null;
+  const jsonText = extractJsonObject(block.text);
+  if (!jsonText) {
+    console.error('[ZOAS] AI 응답에서 JSON 객체를 찾지 못함:', block.text.slice(0, 200));
+    return null;
+  }
   try {
-    const parsed = JSON.parse(block.text);
+    const parsed = JSON.parse(jsonText);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const cleaned: Record<string, string> = {};
       for (const [k, v] of Object.entries(parsed)) {
@@ -63,7 +80,23 @@ export async function generateSelectorsWithAI(
       return cleaned;
     }
     return null;
-  } catch {
+  } catch (err) {
+    console.error('[ZOAS] AI JSON 파싱 실패:', String(err), jsonText.slice(0, 200));
     return null;
   }
+}
+
+/**
+ * AI 텍스트 응답에서 JSON 객체를 추출한다.
+ * Haiku가 "코드 펜스 금지" 지시에도 ```json …``` 으로 감싸거나 앞뒤 설명을 붙이는 경우가
+ * 있어, 펜스를 벗기고 가장 바깥 중괄호 객체를 잘라낸다 (BUG-011).
+ */
+export function extractJsonObject(text: string): string | null {
+  let t = text.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence?.[1] !== undefined) t = fence[1].trim();
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) return null;
+  return t.slice(start, end + 1);
 }
