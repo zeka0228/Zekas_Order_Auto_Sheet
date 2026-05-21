@@ -23,5 +23,16 @@ id = "e0c1892867c840408fae6383f809135b"
 # 개발자 Anthropic 키 — `pnpm --filter @zoas/worker exec wrangler secret put ANTHROPIC_API_KEY` 로 설정.
 # [vars] 에 평문으로 두지 말 것. 로컬 dev는 .dev.vars 사용 (.gitignore 됨).
 
+# Cloudflare AI Gateway 경유 (BUG-010: Worker가 HKG colo에서 직접 호출 시 Anthropic 403).
+# 대시보드 AI > AI Gateway 에서 이름 "zoas" 게이트웨이 생성. 계정 ID는 비밀 아님.
+# 코드는 /anthropic/v1/messages 네이티브 경로를 구성 (compat 경로 아님).
+#
+# TODO(Phase 6, 출시 전): Authenticated Gateway 켜기. 현재 게이트웨이는 인증 없음 →
+#   누구나 이 URL로 우리 Anthropic 키 비용을 소비 가능. 켜면 매 요청에 cf-aig-authorization
+#   헤더 필요 → ai-proxy.ts에 헤더 추가 + wrangler secret put CF_AIG_TOKEN.
+[vars]
+AI_GATEWAY_ACCOUNT_ID = "b5ccdf163708c1b71febc61759fa7729"
+AI_GATEWAY_NAME = "zoas"
+
 [observability]
 enabled = true

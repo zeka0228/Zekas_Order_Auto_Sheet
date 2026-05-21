@@ -44,9 +44,41 @@ export function detectLang(text: string): string {
   return 'xx';
 }
 
+/**
+ * 셀렉터 생성과 무관해 AI 토큰만 잡아먹는 서브트리·노드를 제거한다.
+ * <script>/<style>은 제외 — 내용은 walkAndMask가 비우고 태그만 남긴다(기존 동작 유지).
+ * <nav>/<footer> 등은 주문 요약이 들어있을 수 있어 보수적으로 남긴다(추후 측정 후 재검토).
+ */
+const NOISE_TAGS = new Set([
+  'HEAD', 'TITLE', 'LINK', 'META', 'BASE',
+  'SVG', 'IFRAME', 'NOSCRIPT', 'TEMPLATE', 'CANVAS',
+  'VIDEO', 'AUDIO', 'SOURCE', 'PICTURE', 'OBJECT', 'EMBED',
+]);
+
+/** root를 in-place로 정리: 노이즈 태그·주석·공백 전용 텍스트 노드 제거. */
+export function pruneNoise(root: Element): void {
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as Element;
+      if (NOISE_TAGS.has(el.tagName.toUpperCase())) {
+        el.remove();
+        continue;
+      }
+      pruneNoise(el);
+    } else if (child.nodeType === Node.COMMENT_NODE) {
+      child.parentNode?.removeChild(child);
+    } else if (child.nodeType === Node.TEXT_NODE) {
+      if ((child as Text).data.trim().length === 0) {
+        child.parentNode?.removeChild(child);
+      }
+    }
+  }
+}
+
 /** DOM 트리를 받아 텍스트 노드를 placeholder로 치환한 sanitized HTML 문자열을 반환. */
 export function sanitizeHTML(root: Element): string {
   const cloned = root.cloneNode(true) as Element;
+  pruneNoise(cloned); // 토큰 절감: 무관 서브트리·주석·공백 제거
   walkAndMask(cloned);
   stripUnsafeAttrs(cloned);
   return cloned.outerHTML;
@@ -68,13 +100,34 @@ function walkAndMask(node: Node): void {
   for (const child of Array.from(node.childNodes)) walkAndMask(child);
 }
 
+const KEEP_ATTR = /^(class|id|data-|aria-|role|name|type|placeholder)/i;
+/** 본질적으로 사람이 읽는 텍스트를 담는 속성 — 값을 항상 마스킹. */
+const HUMAN_TEXT_ATTR = /^(aria-label|aria-description|aria-placeholder|placeholder|alt|title)$/i;
+
+/** 보존 대상 속성이라도 값이 사람 텍스트/PII면 마스킹해야 한다. */
+function looksLikePII(value: string): boolean {
+  return (
+    /@/.test(value) || // 이메일
+    /\d{7,}/.test(value) || // 긴 숫자열 (전화·주문번호·ID)
+    /[가-힯぀-ヿ一-鿿]/.test(value) || // CJK 사람 텍스트
+    value.length > 40 // 긴 자유 텍스트
+  );
+}
+
 function stripUnsafeAttrs(root: Element): void {
-  // value, href, src 같은 사용자 데이터가 담길 수 있는 속성 제거.
-  // class, id, data-* 같은 구조 식별 속성은 보존.
-  const KEEP = /^(class|id|data-|aria-|role|name|type|placeholder)/i;
-  for (const el of Array.from(root.querySelectorAll('*'))) {
+  // value, href, src, style 등 사용자 데이터가 담길 수 있는 속성은 제거.
+  // class, id, data-* 같은 구조 식별 속성은 보존하되, 값이 PII면 placeholder로 치환.
+  const all = [root, ...Array.from(root.querySelectorAll('*'))];
+  for (const el of all) {
     for (const attr of Array.from(el.attributes)) {
-      if (!KEEP.test(attr.name)) el.removeAttribute(attr.name);
+      if (!KEEP_ATTR.test(attr.name)) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      // 속성 이름(=셀렉터 식별자)은 유지하고, 사람 텍스트/PII 값만 마스킹.
+      if (HUMAN_TEXT_ATTR.test(attr.name) || looksLikePII(attr.value)) {
+        el.setAttribute(attr.name, classify(attr.value));
+      }
     }
   }
 }

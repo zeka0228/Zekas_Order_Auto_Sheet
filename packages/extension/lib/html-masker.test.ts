@@ -4,6 +4,7 @@ import {
   detectCurrency,
   detectLang,
   maskedRatio,
+  pruneNoise,
   sanitizeHTML,
 } from './html-masker';
 
@@ -86,8 +87,10 @@ describe('sanitizeHTML — 구조 보존', () => {
     expect(out).toContain('class="order"');
     expect(out).toContain('id="o1"');
     expect(out).toContain('data-test="x"');
-    expect(out).toContain('aria-label="주문"');
     expect(out).toContain('role="region"');
+    // aria-label은 속성 이름은 유지하되 사람 텍스트 값은 마스킹
+    expect(out).toContain('aria-label=');
+    expect(out).not.toContain('aria-label="주문"');
   });
 
   it('href / src / value 같은 사용자 데이터 attribute는 제거', () => {
@@ -101,7 +104,9 @@ describe('sanitizeHTML — 구조 보존', () => {
     expect(out).not.toContain('cdn.example.com');
     expect(out).not.toContain('고객 실명');
     expect(out).toContain('data-id="x"');
-    expect(out).toContain('placeholder="이름"');
+    // placeholder 속성 이름은 유지하되 사람 텍스트 값은 마스킹
+    expect(out).toContain('placeholder=');
+    expect(out).not.toContain('placeholder="이름"');
   });
 
   it('<script>·<style> 내용은 통째 제거', () => {
@@ -157,6 +162,110 @@ describe('sanitizeHTML — PII 비누설 (가장 중요)', () => {
     const out = sanitizeHTML(root);
     expect(out).not.toContain('광화문');
     expect(out).not.toContain('sensitive');
+  });
+});
+
+describe('sanitizeHTML — 속성 값 마스킹 (PII 누설 방지)', () => {
+  it('aria-label / placeholder 같은 사람 텍스트 속성 값은 마스킹', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<button aria-label="山田太郎様の注文を確定">x</button>' +
+      '<input placeholder="홍길동 이메일 입력" />';
+    const out = sanitizeHTML(root);
+    expect(out).not.toContain('山田太郎');
+    expect(out).not.toContain('홍길동');
+    // 속성 이름은 살아있어 [attr] 셀렉터는 여전히 동작
+    expect(out).toContain('aria-label=');
+    expect(out).toContain('placeholder=');
+  });
+
+  it('PII형 data-* 값(이메일·긴 숫자열)은 마스킹', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div data-user-id="100234567" data-email="leak@example.com">x</div>';
+    const out = sanitizeHTML(root);
+    expect(out).not.toContain('100234567');
+    expect(out).not.toContain('leak@example.com');
+    expect(out).toContain('data-user-id=');
+    expect(out).toContain('data-email=');
+  });
+
+  it('의미 있는 구조 data-* 값(짧은 식별자)은 보존', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<button data-testid="confirm-order" data-role="pay">x</button>';
+    const out = sanitizeHTML(root);
+    expect(out).toContain('data-testid="confirm-order"');
+    expect(out).toContain('data-role="pay"');
+  });
+
+  it('enum 속성(role·type·aria-hidden)은 그대로', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<input type="text" role="textbox" aria-hidden="false" class="x" />';
+    const out = sanitizeHTML(root);
+    expect(out).toContain('type="text"');
+    expect(out).toContain('role="textbox"');
+    expect(out).toContain('aria-hidden="false"');
+    expect(out).toContain('class="x"');
+  });
+});
+
+describe('pruneNoise — 토큰 절감', () => {
+  it('노이즈 태그(svg·iframe·noscript·media)를 통째 제거', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<svg><path/></svg>' +
+      '<iframe></iframe>' +
+      '<noscript>no js</noscript>' +
+      '<video><source/></video>' +
+      '<canvas></canvas>' +
+      '<section class="order">본문</section>';
+    pruneNoise(root);
+    expect(root.querySelector('svg')).toBeNull();
+    expect(root.querySelector('iframe')).toBeNull();
+    expect(root.querySelector('noscript')).toBeNull();
+    expect(root.querySelector('video')).toBeNull();
+    expect(root.querySelector('canvas')).toBeNull();
+    // 본문은 보존
+    expect(root.querySelector('.order')?.textContent).toBe('본문');
+  });
+
+  it('HTML 주석 제거', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<!-- 추적 코드 --><p>x</p><!-- another -->';
+    pruneNoise(root);
+    expect(root.innerHTML).not.toContain('추적 코드');
+    expect(root.innerHTML).not.toContain('another');
+    expect(root.querySelector('p')).not.toBeNull();
+  });
+
+  it('공백 전용 텍스트 노드 제거 (들여쓰기·줄바꿈)', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '\n   <span>a</span>\n   <span>b</span>\n   ';
+    pruneNoise(root);
+    // 공백 노드가 사라져 자식은 span 2개만
+    expect(root.childNodes.length).toBe(2);
+  });
+
+  it('sanitizeHTML: <head>(meta·link·title) 통째 제거, body는 보존', () => {
+    const html = document.createElement('html');
+    html.innerHTML =
+      '<head><title>Shop</title><meta charset="utf-8"><link rel="stylesheet" href="x.css"></head>' +
+      '<body><section class="order">주문</section></body>';
+    const out = sanitizeHTML(html);
+    expect(out).not.toContain('<head>');
+    expect(out).not.toContain('<title>');
+    expect(out).not.toContain('<meta');
+    expect(out).not.toContain('<link');
+    expect(out).toContain('class="order"');
+  });
+
+  it('sanitizeHTML: <script>/<style> 태그는 여전히 남는다 (기존 동작 유지)', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<script>var x=1;</script><style>.a{}</style><p>본문</p>';
+    const out = sanitizeHTML(root);
+    expect(out).toContain('<script>');
+    expect(out).toContain('<style>');
   });
 });
 
