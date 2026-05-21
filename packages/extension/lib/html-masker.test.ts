@@ -4,6 +4,7 @@ import {
   detectCurrency,
   detectLang,
   maskedRatio,
+  pruneNoise,
   sanitizeHTML,
 } from './html-masker';
 
@@ -157,6 +158,65 @@ describe('sanitizeHTML — PII 비누설 (가장 중요)', () => {
     const out = sanitizeHTML(root);
     expect(out).not.toContain('광화문');
     expect(out).not.toContain('sensitive');
+  });
+});
+
+describe('pruneNoise — 토큰 절감', () => {
+  it('노이즈 태그(svg·iframe·noscript·media)를 통째 제거', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<svg><path/></svg>' +
+      '<iframe></iframe>' +
+      '<noscript>no js</noscript>' +
+      '<video><source/></video>' +
+      '<canvas></canvas>' +
+      '<section class="order">본문</section>';
+    pruneNoise(root);
+    expect(root.querySelector('svg')).toBeNull();
+    expect(root.querySelector('iframe')).toBeNull();
+    expect(root.querySelector('noscript')).toBeNull();
+    expect(root.querySelector('video')).toBeNull();
+    expect(root.querySelector('canvas')).toBeNull();
+    // 본문은 보존
+    expect(root.querySelector('.order')?.textContent).toBe('본문');
+  });
+
+  it('HTML 주석 제거', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<!-- 추적 코드 --><p>x</p><!-- another -->';
+    pruneNoise(root);
+    expect(root.innerHTML).not.toContain('추적 코드');
+    expect(root.innerHTML).not.toContain('another');
+    expect(root.querySelector('p')).not.toBeNull();
+  });
+
+  it('공백 전용 텍스트 노드 제거 (들여쓰기·줄바꿈)', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '\n   <span>a</span>\n   <span>b</span>\n   ';
+    pruneNoise(root);
+    // 공백 노드가 사라져 자식은 span 2개만
+    expect(root.childNodes.length).toBe(2);
+  });
+
+  it('sanitizeHTML: <head>(meta·link·title) 통째 제거, body는 보존', () => {
+    const html = document.createElement('html');
+    html.innerHTML =
+      '<head><title>Shop</title><meta charset="utf-8"><link rel="stylesheet" href="x.css"></head>' +
+      '<body><section class="order">주문</section></body>';
+    const out = sanitizeHTML(html);
+    expect(out).not.toContain('<head>');
+    expect(out).not.toContain('<title>');
+    expect(out).not.toContain('<meta');
+    expect(out).not.toContain('<link');
+    expect(out).toContain('class="order"');
+  });
+
+  it('sanitizeHTML: <script>/<style> 태그는 여전히 남는다 (기존 동작 유지)', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<script>var x=1;</script><style>.a{}</style><p>본문</p>';
+    const out = sanitizeHTML(root);
+    expect(out).toContain('<script>');
+    expect(out).toContain('<style>');
   });
 });
 

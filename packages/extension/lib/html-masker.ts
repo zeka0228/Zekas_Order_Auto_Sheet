@@ -44,9 +44,41 @@ export function detectLang(text: string): string {
   return 'xx';
 }
 
+/**
+ * 셀렉터 생성과 무관해 AI 토큰만 잡아먹는 서브트리·노드를 제거한다.
+ * <script>/<style>은 제외 — 내용은 walkAndMask가 비우고 태그만 남긴다(기존 동작 유지).
+ * <nav>/<footer> 등은 주문 요약이 들어있을 수 있어 보수적으로 남긴다(추후 측정 후 재검토).
+ */
+const NOISE_TAGS = new Set([
+  'HEAD', 'TITLE', 'LINK', 'META', 'BASE',
+  'SVG', 'IFRAME', 'NOSCRIPT', 'TEMPLATE', 'CANVAS',
+  'VIDEO', 'AUDIO', 'SOURCE', 'PICTURE', 'OBJECT', 'EMBED',
+]);
+
+/** root를 in-place로 정리: 노이즈 태그·주석·공백 전용 텍스트 노드 제거. */
+export function pruneNoise(root: Element): void {
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as Element;
+      if (NOISE_TAGS.has(el.tagName.toUpperCase())) {
+        el.remove();
+        continue;
+      }
+      pruneNoise(el);
+    } else if (child.nodeType === Node.COMMENT_NODE) {
+      child.parentNode?.removeChild(child);
+    } else if (child.nodeType === Node.TEXT_NODE) {
+      if ((child as Text).data.trim().length === 0) {
+        child.parentNode?.removeChild(child);
+      }
+    }
+  }
+}
+
 /** DOM 트리를 받아 텍스트 노드를 placeholder로 치환한 sanitized HTML 문자열을 반환. */
 export function sanitizeHTML(root: Element): string {
   const cloned = root.cloneNode(true) as Element;
+  pruneNoise(cloned); // 토큰 절감: 무관 서브트리·주석·공백 제거
   walkAndMask(cloned);
   stripUnsafeAttrs(cloned);
   return cloned.outerHTML;
