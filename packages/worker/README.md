@@ -10,22 +10,16 @@ Cloudflare Worker + D1 — ZOAS의 **글로벌 Config DB**와 AI 프록시.
 
 ## 초기 셋업
 
+상세한 단계별 가이드는 [`SETUP.md`](./SETUP.md) 참조. 요약:
+
 ```bash
-# 1. D1 생성 → wrangler.toml의 database_id 갱신
-wrangler d1 create zoas-configs
-
-# 2. KV 네임스페이스 생성 → id 갱신
-wrangler kv namespace create RATE_LIMIT
-
-# 3. 개발자 Anthropic 키 등록
-wrangler secret put ANTHROPIC_API_KEY
-
-# 4. 마이그레이션 적용
-pnpm db:migrate:local      # 로컬
-pnpm db:migrate:prod       # 운영
-
-# 5. 로컬 개발
-pnpm dev
+# 저장소 루트에서 실행
+pnpm --filter @zoas/worker exec wrangler login
+pnpm --filter @zoas/worker exec wrangler d1 create zoas-configs          # → database_id 주입
+pnpm --filter @zoas/worker exec wrangler kv namespace create RATE_LIMIT  # → id 주입
+pnpm --filter @zoas/worker exec wrangler secret put ANTHROPIC_API_KEY
+pnpm --filter @zoas/worker db:migrate:prod
+pnpm --filter @zoas/worker deploy                                        # → 배포 URL
 ```
 
 ## 보안 메모
