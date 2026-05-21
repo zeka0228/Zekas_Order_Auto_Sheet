@@ -86,6 +86,8 @@ pnpm --filter @zoas/worker run deploy
 
 > `run`을 빼면 pnpm이 `deploy`를 내장 명령으로 가로채 `ERR_PNPM_INVALID_DEPLOY_TARGET`이 납니다. 스크립트 실행임을 명시하려면 `run`을 붙이세요.
 
+> ⚠️ **배포는 이 CLI 수동 명령 단일 경로입니다.** Cloudflare 대시보드의 **Workers Builds**(GitHub 레포 Git 연결 → push마다 자동 빌드/배포)는 **사용하지 않습니다.** 모노레포라 기본 설정으로는 빌드가 실패하고, 배포 주체가 둘이 되면 어느 버전이 라이브인지 모호해집니다. 만약 PR에 `Workers Builds: zoas` 체크가 보이면(= git 연결이 켜진 상태) 대시보드에서 해제하세요: **Workers & Pages → `zoas-worker` → Settings → Builds → Disconnect.** 코드 검증은 GitHub Actions(`.github/workflows/ci.yml`)가 담당합니다. (설계 진화 로그 §8.7)
+
 출력 마지막 줄에 배포 URL이 나옵니다:
 ```
 Published zoas-worker (X.XX sec)
