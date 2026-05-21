@@ -37,6 +37,9 @@ Thumbs.db
 # Coverage
 coverage/
 
+# 로컬 검증용 실 페이지 HTML (실 PII 포함 — 절대 커밋 금지)
+.scratch/
+
 # Web Store packages
 *.zip
 web-ext-artifacts/
