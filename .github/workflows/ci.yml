@@ -15,19 +15,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        # v4의 mutable tag가 가리키던 SHA(b906affc...)가 codeload에서 사라져 다운로드 실패 →
-        # 최신 stable immutable tag로 고정 (옵션 호환 그대로).
-        uses: pnpm/action-setup@v6.0.8
-        with:
-          version: 9.15.0
-          run_install: false
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20.10'
-          cache: pnpm
+
+      # pnpm/action-setup repo가 codeload에서 다운로드 불가 상태(v4·v6 모두 실패) →
+      # Node 내장 corepack으로 pnpm 활성화. third-party action 0개 의존.
+      - name: Install pnpm via corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.0 --activate
+          pnpm --version
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
