@@ -13,6 +13,7 @@ import {
   looksLikeCheckoutOrCompletion,
   decidePageRole,
 } from '../lib/checkout-flow';
+import { isDomesticSite } from '../lib/domestic-site-gate';
 import type { SiteConfig } from '../lib/schemas';
 
 /**
@@ -31,6 +32,10 @@ export default defineContentScript({
   allFrames: true,
   async main() {
     if (!looksLikeCheckoutOrCompletion(document, location.href)) return;
+    if (isDomesticSite(document, location.href)) {
+      console.debug('[ZOAS] 국내 사이트로 판정 — 캡처/AI 호출 스킵:', location.hostname);
+      return;
+    }
 
     const domain = location.hostname;
     const config = await resolveConfig(domain);
