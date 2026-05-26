@@ -2,13 +2,15 @@ import type { Env } from './env';
 
 const PROMPTS: Record<'shop' | 'baedaeji', string> = {
   shop: `당신은 웹 페이지의 HTML 구조로부터 CSS 셀렉터를 추출하는 도우미입니다.
-입력 HTML은 모든 텍스트가 [TYPE_…] 형태의 placeholder로 치환된 마스킹된 쇼핑몰 페이지입니다.
-이 페이지는 결제 직전(주문 확인) 페이지일 수도, 결제 완료 페이지일 수도 있습니다. 두 경우 모두를
-하나의 셀렉터 묶음으로 다룹니다 — 현재 페이지에 없는 요소의 키는 생략하세요.
+입력은 마스킹된(텍스트가 [TYPE_…] placeholder로 치환된) 쇼핑몰 페이지 HTML입니다.
+한 페이지(결제 직전 또는 완료 페이지)만 줄 수도 있고, 두 페이지(이전 단계인 장바구니 + 현재
+결제 직전/완료)를 함께 줄 수도 있습니다. 두 페이지가 주어지면 같은 사이트의 다른 시점이므로
+CSS class·DOM 구조가 공유되는 경우가 많습니다 — 두 페이지에서 보이는 요소의 셀렉터를
+종합해 가장 안정적인 한 묶음을 만드세요.
 
 핵심 필드를 가리키는 안정적인 CSS 셀렉터를 JSON 객체로 반환:
 - orderNumber: 주문번호 (보통 결제 완료 페이지에만 있음)
-- productName: 상품명
+- productName: 상품명 (장바구니에서 보일 가능성 높음)
 - price: 가격(통화기호+금액 텍스트)
 - currency: 통화 표기 요소 (price와 같을 수 있음)
 - payButton: 실제 결제를 확정하는 버튼/링크 (예: "注文を確定", "결제하기", "Place order").
@@ -17,7 +19,9 @@ const PROMPTS: Record<'shop' | 'baedaeji', string> = {
 반드시 다음 형태의 JSON만 출력 (코드 펜스 금지):
 {"orderNumber":"...", "productName":"...", "price":"...", "currency":"...", "payButton":"..."}
 
-값이 보이지 않으면 키 자체를 생략. data-* 또는 의미 있는 class 선호. nth-child 같은 깨지기 쉬운 셀렉터는 피하세요.`,
+값이 어느 페이지에서도 보이지 않으면 키 자체를 생략. data-* 또는 의미 있는 class 선호.
+nth-child 같은 깨지기 쉬운 셀렉터는 피하세요. 한 사이트의 두 페이지에 같은 요소가 다른
+class로 나타나면 양쪽 모두 매칭되는 셀렉터(또는 더 안정적인 쪽)를 고르세요.`,
   baedaeji: `당신은 한국 배송대행지(배대지) 주문서 폼의 입력 필드를 매핑하는 도우미입니다.
 입력 HTML은 마스킹된 주문서 페이지입니다. 다음 필드의 input/select/textarea 셀렉터를 JSON 객체로 반환하세요:
 trackingNumber, productName, declaredPrice, currency, quantity, productCategory.
@@ -41,7 +45,11 @@ export async function generateSelectorsWithAI(
   env: Env,
   type: 'shop' | 'baedaeji',
   sanitizedHtml: string,
+  extraContextHtml?: string,
 ): Promise<Record<string, string> | null> {
+  const userContent = extraContextHtml
+    ? `=== 이전 단계 페이지 (장바구니/결제 진행, 같은 사이트) ===\n${extraContextHtml}\n\n=== 현재 페이지 (결제 직전 또는 완료) ===\n${sanitizedHtml}`
+    : sanitizedHtml;
   const res = await fetch(anthropicEndpoint(env), {
     method: 'POST',
     headers: {
@@ -53,7 +61,7 @@ export async function generateSelectorsWithAI(
       model: 'claude-haiku-4-5',
       max_tokens: 2048,
       system: PROMPTS[type],
-      messages: [{ role: 'user', content: sanitizedHtml }],
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
   if (!res.ok) {

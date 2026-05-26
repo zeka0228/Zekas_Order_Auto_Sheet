@@ -18,17 +18,20 @@ export async function handleGenerate(req: Request, env: Env): Promise<Response> 
   if (!parsed.success) {
     return new Response(JSON.stringify(parsed.error.issues), { status: 400 });
   }
-  const { domain, type, sanitized_html, url_pattern } = parsed.data;
+  const { domain, type, sanitized_html, url_pattern, extra_context_html } = parsed.data;
 
   if (!validateMasking(sanitized_html)) {
     return new Response('Masking insufficient', { status: 400 });
+  }
+  if (extra_context_html && !validateMasking(extra_context_html)) {
+    return new Response('Masking insufficient (extra context)', { status: 400 });
   }
 
   // 이미 있으면 그것 반환 (race 방지)
   const existing = await findBestConfig(env, domain, type);
   if (existing) return Response.json(existing);
 
-  const selectors = await generateSelectorsWithAI(env, type, sanitized_html);
+  const selectors = await generateSelectorsWithAI(env, type, sanitized_html, extra_context_html);
   if (!selectors) {
     return new Response('AI generation failed', { status: 502 });
   }
