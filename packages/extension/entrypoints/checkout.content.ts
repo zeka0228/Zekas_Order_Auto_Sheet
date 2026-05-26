@@ -1,6 +1,6 @@
-import { getCachedConfig, generateConfig } from '../lib/config-client';
+import { getCachedConfig, generateConfig, reportSuccess } from '../lib/config-client';
 import { sanitizeHTML } from '../lib/html-masker';
-import { parseWithSelectors } from '../lib/checkout-parser';
+import { parseWithSelectors, hasCriticalFields } from '../lib/checkout-parser';
 import {
   saveSnapshot,
   consumeSnapshot,
@@ -12,11 +12,12 @@ import {
   type CartHtmlSnapshot,
 } from '../lib/cart-html-snapshot';
 import { savePendingOrder } from '../lib/storage';
-import { reportParseOutcome } from '../lib/self-healing';
+import { reportParseOutcome, tryHeal } from '../lib/self-healing';
 import {
   looksLikeCheckoutOrCompletion,
   decidePageRole,
   isCartPage,
+  hasCartPriceSignal,
 } from '../lib/checkout-flow';
 import { isDomesticSite } from '../lib/domestic-site-gate';
 import type { SiteConfig } from '../lib/schemas';
@@ -48,9 +49,11 @@ export default defineContentScript({
     const domain = location.hostname;
 
     if (isCartPage(location.href)) {
-      // 장바구니: AI 호출 안 함, 마스킹 HTML만 누적
+      // 장바구니: 마스킹 HTML 누적 + (캐시가 있으면) 셀렉터 자가 치유 검증
       captureCartHtml(domain);
       bindCartFormSubmit(domain);
+      const cached = await getCachedConfig(domain, 'shop');
+      if (cached) await tryParseCartAndHeal(domain, cached);
       return;
     }
 
@@ -81,6 +84,35 @@ async function resolveConfig(domain: string): Promise<SiteConfig | null> {
   const sanitized = sanitizeHTML(document.documentElement);
   const cartSnap = await consumeCartSnapshot(domain);
   return generateConfig(domain, 'shop', sanitized, cartSnap?.maskedHtml);
+}
+
+/**
+ * 캐시된 config로 장바구니에서 상품명·가격을 파싱한다. 결과가 부실하면 자가 치유 발동:
+ *   1) 페이지에 가격 패턴이 있는지 확인 — 빈 장바구니면 stale 아님 → 발동 안 함
+ *   2) tryHeal로 즉시 AI 재호출 (cart 페이지 자체 HTML로 generateConfig)
+ *   3) 새 셀렉터로 재파싱 → 성공이면 success 보고, 실패는 통계만 누적 (무한 루프 방지)
+ */
+async function tryParseCartAndHeal(
+  domain: string,
+  config: SiteConfig,
+): Promise<void> {
+  const fields = parseWithSelectors(document, config.selectors);
+  if (hasCriticalFields(fields)) {
+    await reportSuccess(config.id);
+    return;
+  }
+  // 빈 카트면 셀렉터 stale 아님 — 사용자가 아직 안 담은 것
+  if (!hasCartPriceSignal(document)) return;
+
+  const healed = await tryHeal({
+    domain,
+    type: 'shop',
+    failedConfig: config,
+    root: document.documentElement,
+  });
+  if (!healed) return;
+  const second = parseWithSelectors(document, healed.selectors);
+  if (hasCriticalFields(second)) await reportSuccess(healed.id);
 }
 
 /**

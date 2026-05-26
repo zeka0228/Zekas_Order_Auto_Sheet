@@ -3,6 +3,7 @@ import {
   looksLikeCheckoutOrCompletion,
   decidePageRole,
   isCartPage,
+  hasCartPriceSignal,
 } from './checkout-flow';
 
 function docWithText(text: string): Document {
@@ -86,6 +87,36 @@ describe('isCartPage', () => {
     'https://shop.example.com/discard-bag',
   ])('장바구니 아님: %s', (url) => {
     expect(isCartPage(url)).toBe(false);
+  });
+});
+
+describe('hasCartPriceSignal — 빈 카트 vs 셀렉터 stale 구분용', () => {
+  it.each([
+    '¥300',
+    '$30.99',
+    '€12,50',
+    '₩30,000',
+    '£99',
+    '300円',
+    '30,000원',
+    '100元',
+    '여러 상품 ¥300 + ¥150 = ¥450',
+  ])('가격 패턴 hit: %s', (text) => {
+    expect(hasCartPriceSignal(docWithText(text))).toBe(true);
+  });
+
+  it.each([
+    '장바구니가 비어 있습니다',
+    'Your cart is empty',
+    'カートに商品がありません',
+    '购物车为空',
+    '상품을 추가해 주세요',
+  ])('빈 카트 텍스트는 false: %s', (text) => {
+    expect(hasCartPriceSignal(docWithText(text))).toBe(false);
+  });
+
+  it('숫자만 있고 통화 표기 없으면 false (전화번호·재고 등)', () => {
+    expect(hasCartPriceSignal(docWithText('재고 12개, 평점 5'))).toBe(false);
   });
 });
 

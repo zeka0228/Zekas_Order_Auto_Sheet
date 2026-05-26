@@ -48,6 +48,19 @@ export function isCartPage(url: string): boolean {
   );
 }
 
+/**
+ * 본문에 가격(통화기호+숫자) 패턴이 하나라도 있는가 — 빈 장바구니 판별용.
+ *
+ * 캐시된 셀렉터가 장바구니에서 상품명·가격을 못 잡았을 때, 그게 "셀렉터 stale"인지
+ * "빈 장바구니"인지 구분하기 위함. 빈 장바구니면 자가 치유를 발동시키지 않는다 —
+ * 사이트 구조가 바뀐 게 아니라 그냥 사용자가 아직 안 담은 것.
+ */
+export function hasCartPriceSignal(doc: Document): boolean {
+  const text = doc.body?.innerText ?? doc.body?.textContent ?? '';
+  // 통화기호 + 숫자, 또는 숫자 + 통화 접미사. CJK 통화 단위도 포함.
+  return /[¥$€₩£]\s*\d|\d+(?:[,.]\d+)*\s*(?:원|円|元)/.test(text);
+}
+
 export type PageRole = 'completion' | 'prepay' | 'none';
 
 /**
