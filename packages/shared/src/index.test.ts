@@ -115,6 +115,28 @@ describe('GenerateConfigRequestSchema', () => {
       GenerateConfigRequestSchema.parse({ ...base, type: 'unknown' }),
     ).toThrow();
   });
+
+  it('extra_context_html 있는 경우도 valid (장바구니 누적 컨텍스트)', () => {
+    expect(() =>
+      GenerateConfigRequestSchema.parse({
+        ...base,
+        extra_context_html: '<div class="cart">[ID_8]</div>',
+      }),
+    ).not.toThrow();
+  });
+
+  it('빈 extra_context_html reject', () => {
+    expect(() =>
+      GenerateConfigRequestSchema.parse({ ...base, extra_context_html: '' }),
+    ).toThrow();
+  });
+
+  it('500_000자 초과 extra_context_html reject', () => {
+    const tooLong = 'x'.repeat(500_001);
+    expect(() =>
+      GenerateConfigRequestSchema.parse({ ...base, extra_context_html: tooLong }),
+    ).toThrow();
+  });
 });
 
 describe('FeedbackRequestSchema', () => {

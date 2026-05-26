@@ -7,11 +7,16 @@ import {
   mergeCapture,
   buildPendingOrder,
 } from '../lib/order-snapshot';
+import {
+  consumeCartSnapshot,
+  type CartHtmlSnapshot,
+} from '../lib/cart-html-snapshot';
 import { savePendingOrder } from '../lib/storage';
 import { reportParseOutcome } from '../lib/self-healing';
 import {
   looksLikeCheckoutOrCompletion,
   decidePageRole,
+  isCartPage,
 } from '../lib/checkout-flow';
 import { isDomesticSite } from '../lib/domestic-site-gate';
 import type { SiteConfig } from '../lib/schemas';
@@ -20,9 +25,12 @@ import type { SiteConfig } from '../lib/schemas';
  * 결제 캡처 (설계 진화 로그 §1.5 — 결제 클릭 스냅샷 + 완료 페이지 병합).
  *
  * 흐름:
- *   1) 값싼 게이트로 결제·완료 페이지일 법한지 확인
- *   2) config 확보 (캐시 → 없으면 마스킹 후 AI 생성)
- *   3) 역할 판정:
+ *   1) 값싼 게이트로 결제·완료 페이지일 법한지 확인 (다국어 키워드)
+ *   2) 국내 사이트 차단 게이트 (해외 직구만 처리)
+ *   3) 장바구니 페이지면 마스킹 HTML 누적 (진입 시 + form submit 시) 후 종료
+ *      - AI 호출 안 함. 완료 페이지에서 consume하여 extra context로 전달
+ *   4) 그 외 페이지: config 확보 (캐시 → 없으면 AI 생성, cart snapshot 있으면 함께 전달)
+ *   5) 역할 판정:
  *      - 완료 페이지: 파싱 → 클릭 스냅샷 소비·병합 → 저장 → 자가치유 피드백
  *      - 결제 직전 페이지: payButton 클릭에 리스너 부착 → 클릭 시 스냅샷 덮어쓰기
  */
@@ -38,6 +46,14 @@ export default defineContentScript({
     }
 
     const domain = location.hostname;
+
+    if (isCartPage(location.href)) {
+      // 장바구니: AI 호출 안 함, 마스킹 HTML만 누적
+      captureCartHtml(domain);
+      bindCartFormSubmit(domain);
+      return;
+    }
+
     const config = await resolveConfig(domain);
     if (!config) return;
 
@@ -55,12 +71,48 @@ export default defineContentScript({
   },
 });
 
-/** 캐시된 config가 있으면 사용, 없으면 마스킹 HTML로 AI 생성. */
+/**
+ * 캐시된 config가 있으면 사용, 없으면 마스킹 HTML로 AI 생성.
+ * cart snapshot이 살아있으면 함께 extra context로 전달 → AI가 두 페이지로 셀렉터 학습.
+ */
 async function resolveConfig(domain: string): Promise<SiteConfig | null> {
   const cached = await getCachedConfig(domain, 'shop');
   if (cached) return cached;
   const sanitized = sanitizeHTML(document.documentElement);
-  return generateConfig(domain, 'shop', sanitized);
+  const cartSnap = await consumeCartSnapshot(domain);
+  return generateConfig(domain, 'shop', sanitized, cartSnap?.maskedHtml);
+}
+
+/**
+ * 마스킹 HTML을 background로 전달 → background가 chrome.storage.local에 저장.
+ * navigation 직전에도 안전하도록 sendMessage(fire-and-forget) 사용.
+ */
+function captureCartHtml(domain: string): void {
+  try {
+    const maskedHtml = sanitizeHTML(document.documentElement);
+    const payload: CartHtmlSnapshot = {
+      domain,
+      url: location.href,
+      maskedHtml,
+      capturedAt: Date.now(),
+    };
+    chrome.runtime.sendMessage({ type: 'CART_HTML_SNAPSHOT', payload });
+  } catch (err) {
+    console.debug('[ZOAS] cart HTML 캡처 실패:', err);
+  }
+}
+
+/**
+ * 장바구니 페이지에서 form submit 시점에 마스킹 HTML을 재캡처(덮어쓰기).
+ * capture-phase로 form 기본 submit 직전에 동기적으로 DOM을 읽는다.
+ * (사용자가 수량 변경·쿠폰 적용한 최신 상태가 전달되도록.)
+ */
+function bindCartFormSubmit(domain: string): void {
+  document.addEventListener(
+    'submit',
+    () => captureCartHtml(domain),
+    true, // capture phase
+  );
 }
 
 /** 완료 페이지: 클릭 스냅샷을 소비·병합해 최종 주문을 저장하고 자가치유에 결과를 보고. */

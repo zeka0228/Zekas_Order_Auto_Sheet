@@ -39,11 +39,14 @@ export async function generateConfig(
   domain: string,
   type: 'shop' | 'baedaeji',
   sanitizedHtml: string,
+  extraContextHtml?: string,
 ): Promise<SiteConfig | null> {
+  const body: Record<string, unknown> = { domain, type, sanitized_html: sanitizedHtml };
+  if (extraContextHtml) body.extra_context_html = extraContextHtml;
   const res = await fetch(`${await baseUrl()}/generate-config`, {
     method: 'POST',
     headers: await headers(),
-    body: JSON.stringify({ domain, type, sanitized_html: sanitizedHtml }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) return null;
   const json = await res.json().catch(() => null);

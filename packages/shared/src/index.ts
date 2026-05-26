@@ -28,12 +28,19 @@ export const SiteConfigSchema = z.object({
 });
 export type SiteConfig = z.infer<typeof SiteConfigSchema>;
 
-/** POST /generate-config 요청 본문. */
+/**
+ * POST /generate-config 요청 본문.
+ *
+ * extra_context_html: 선택 — 같은 도메인의 이전 단계 페이지(보통 장바구니) 마스킹 HTML.
+ * 완료 페이지에 가격·상품명이 없는 사이트에서 AI가 두 페이지 컨텍스트로
+ * 셀렉터를 일괄 추출하도록. 마스킹 검증은 sanitized_html과 동일하게 통과해야 함.
+ */
 export const GenerateConfigRequestSchema = z.object({
   domain: z.string().min(1),
   type: ConfigTypeSchema,
   sanitized_html: z.string().min(1).max(500_000),
   url_pattern: z.string().optional(),
+  extra_context_html: z.string().min(1).max(500_000).optional(),
 });
 export type GenerateConfigRequest = z.infer<typeof GenerateConfigRequestSchema>;
 
