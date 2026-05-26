@@ -20,6 +20,7 @@ import {
   hasCartPriceSignal,
 } from '../lib/checkout-flow';
 import { isDomesticSite } from '../lib/domestic-site-gate';
+import { showScanNotification } from '../lib/scan-notification';
 import type { SiteConfig } from '../lib/schemas';
 
 /**
@@ -50,6 +51,7 @@ export default defineContentScript({
 
     if (isCartPage(location.href)) {
       // 장바구니: 마스킹 HTML 누적 + (캐시가 있으면) 셀렉터 자가 치유 검증
+      showScanNotification('recognized');
       captureCartHtml(domain);
       bindCartFormSubmit(domain);
       const cached = await getCachedConfig(domain, 'shop');
@@ -142,7 +144,10 @@ function captureCartHtml(domain: string): void {
 function bindCartFormSubmit(domain: string): void {
   document.addEventListener(
     'submit',
-    () => captureCartHtml(domain),
+    () => {
+      showScanNotification('scanning', 1500);
+      captureCartHtml(domain);
+    },
     true, // capture phase
   );
 }
