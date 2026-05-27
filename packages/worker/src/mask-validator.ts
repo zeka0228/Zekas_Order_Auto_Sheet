@@ -4,8 +4,12 @@
  */
 const PLACEHOLDER_RE = /\[(?:CURRENCY|NUMBER|ID|EMAIL|PHONE|TEXT|LONGTEXT)_/g;
 
-const MIN_PLACEHOLDER_RATIO = 0.3; // 100자당 0.3개 이상의 placeholder
-const MIN_LENGTH = 200;             // 너무 짧으면 분석 의미 없음
+// 실측 기준: 정상 마스킹된 결제/완료 페이지는 100자당 0.5~2개의 placeholder.
+// 0.3은 "광범위한 평문이 통과했을 가능성"의 보수적 하한 — 더 높이면
+// 정상 페이지(예: 텍스트가 적은 결제 완료 화면)를 false negative로 떨굴 위험.
+const MIN_PLACEHOLDER_RATIO = 0.3;
+// 200자 미만이면 비율 자체가 흔들려 의미 없음. 빈 페이지·404 같은 비정상 입력 차단도 겸함.
+const MIN_LENGTH = 200;
 
 export function validateMasking(html: string): boolean {
   if (html.length < MIN_LENGTH) return false;
