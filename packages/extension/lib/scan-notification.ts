@@ -26,6 +26,8 @@ const TOAST_STYLE = [
   'position: fixed',
   'top: 16px',
   'right: 16px',
+  // z-index 상한값(2^31 - 1, int32 max). 쇼핑몰 페이지가 자체 모달·헤더에
+  // 큰 값을 박아도 그 위로 뜨도록 — 임의 큰 수가 아니라 명세상 최댓값.
   'z-index: 2147483647',
   'background: rgba(20, 20, 30, 0.92)',
   'color: white',
