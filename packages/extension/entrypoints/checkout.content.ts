@@ -39,6 +39,10 @@ import type { SiteConfig } from '../lib/schemas';
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle', // U5: 완료 페이지를 빨리 닫아도 잡히도록
+  // 일부 쇼핑몰은 결제 단계 폼·완료 화면을 PG사 iframe 안에 렌더한다.
+  // 메인 프레임에만 주입하면 그 영역의 DOM·submit·payButton 클릭을 전부 놓침.
+  // 게이트(looksLikeCheckoutOrCompletion)가 각 프레임에서 다시 판정하므로
+  // 무관한 광고 iframe까지 들어가도 즉시 빠져나옴 → 비용 거의 0.
   allFrames: true,
   async main() {
     if (!looksLikeCheckoutOrCompletion(document, location.href)) return;
