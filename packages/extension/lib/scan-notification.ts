@@ -48,6 +48,9 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null;
 export function showScanNotification(
   status: ScanStatus,
   autoHideMs: number = 2500,
+  // 상태의 emoji·스타일은 그대로 쓰되 문구만 교체. 수동 스캔에서 "장바구니로 확인 안 됨"
+  // 같은 케이스별 안내를 4-status enum을 늘리지 않고 표현하기 위함.
+  textOverride?: string,
 ): void {
   removeCurrentToast();
 
@@ -59,7 +62,7 @@ export function showScanNotification(
   const emojiSpan = document.createElement('span');
   emojiSpan.textContent = emoji;
   const textSpan = document.createElement('span');
-  textSpan.textContent = `ZOAS · ${text}`;
+  textSpan.textContent = `ZOAS · ${textOverride ?? text}`;
   toast.appendChild(emojiSpan);
   toast.appendChild(textSpan);
 

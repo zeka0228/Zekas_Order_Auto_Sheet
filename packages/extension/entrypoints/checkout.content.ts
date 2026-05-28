@@ -45,6 +45,17 @@ export default defineContentScript({
   // 무관한 광고 iframe까지 들어가도 즉시 빠져나옴 → 비용 거의 0.
   allFrames: true,
   async main() {
+    // 수동 스캔(popup "스캔 시작")은 자동 게이트가 놓친 페이지(SPA 미니카트 등)를
+    // 사용자가 직접 구제하기 위한 길. 따라서 리스너는 게이트 return *이전에*, 그리고
+    // top frame에서만 등록 — allFrames라 모든 프레임이 등록하면 한 번 클릭에 중복 캡처·토스트.
+    if (window.top === window) {
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if ((msg as { type?: string } | null)?.type !== 'SCAN_NOW') return false;
+        void handleManualScan(location.hostname).then(sendResponse);
+        return true; // 비동기 sendResponse
+      });
+    }
+
     if (!looksLikeCheckoutOrCompletion(document, location.href)) return;
     if (isDomesticSite(document, location.href)) {
       console.debug('[ZOAS] 국내 사이트로 판정 — 캡처/AI 호출 스킵:', location.hostname);
@@ -119,6 +130,32 @@ async function tryParseCartAndHeal(
   if (!healed) return;
   const second = parseWithSelectors(document, healed.selectors);
   if (hasCriticalFields(second)) await reportSuccess(healed.id);
+}
+
+/**
+ * 수동 스캔 (popup "스캔 시작" → SCAN_NOW): 현재 페이지의 마스킹 HTML을 무조건 누적한다.
+ *
+ * 설계 (진화 로그 §1.8):
+ *   - 여기선 AI 호출 안 함 — 사용자가 잘못된 페이지에서 눌러도 비용·오염 0.
+ *     실제 AI/캐시 처리는 submit·완료 페이지 진입 시 자동 흐름(resolveConfig)과 합류.
+ *   - 자동 인식 안 되는 페이지도 일단 캡처(SPA 미니카트 등 구제가 목적).
+ *     단 장바구니로 확인되지 않으면(가격신호·cart URL 모두 없음) 그 사실을 알림으로 안내.
+ *   - 알림은 자동 흐름과 동일한 상태 재사용(scanning→completed). 비확인 케이스만 문구로 구분.
+ */
+async function handleManualScan(domain: string): Promise<{ looksLikeCart: boolean }> {
+  showScanNotification('scanning', 1500);
+  captureCartHtml(domain);
+  const looksLikeCart = isCartPage(location.href) || hasCartPriceSignal(document);
+  if (looksLikeCart) {
+    showScanNotification('completed');
+  } else {
+    showScanNotification(
+      'error',
+      3000,
+      '캡처함 · 장바구니 페이지인지 확인 필요',
+    );
+  }
+  return { looksLikeCart };
 }
 
 /**
