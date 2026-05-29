@@ -1,4 +1,6 @@
 import { saveCartSnapshot, type CartHtmlSnapshot } from '../lib/cart-html-snapshot';
+import { savePendingOrder } from '../lib/storage';
+import type { PendingOrder } from '../lib/schemas';
 
 /**
  * 메시지 페이로드 타입.
@@ -6,7 +8,8 @@ import { saveCartSnapshot, type CartHtmlSnapshot } from '../lib/cart-html-snapsh
  */
 type RuntimeMessage =
   | { type: 'PING' }
-  | { type: 'CART_HTML_SNAPSHOT'; payload: CartHtmlSnapshot };
+  | { type: 'CART_HTML_SNAPSHOT'; payload: CartHtmlSnapshot }
+  | { type: 'PENDING_ORDER'; payload: PendingOrder };
 
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
@@ -22,6 +25,11 @@ export default defineBackground(() => {
         // content script가 페이지 navigation 직전에 보내므로 fire-and-forget.
         // chrome.storage.local.set이 비동기지만 background는 navigation 영향 안 받음 → 안전.
         void saveCartSnapshot(msg.payload);
+        return false;
+      case 'PENDING_ORDER':
+        // payButton 클릭 직후 content script가 navigation 전에 보냄 → fire-and-forget.
+        // 완료 페이지 폐기(§1.9) 후 후보 주문은 이 시점에 저장되고 orderNumber는 이메일 백필.
+        void savePendingOrder(msg.payload);
         return false;
       default:
         return false;

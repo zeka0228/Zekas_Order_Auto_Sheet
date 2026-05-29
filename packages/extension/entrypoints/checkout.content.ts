@@ -1,21 +1,14 @@
 import { getCachedConfig, generateConfig, reportSuccess } from '../lib/config-client';
 import { sanitizeHTML } from '../lib/html-masker';
 import { parseWithSelectors, hasCriticalFields } from '../lib/checkout-parser';
-import {
-  saveSnapshot,
-  consumeSnapshot,
-  mergeCapture,
-  buildPendingOrder,
-} from '../lib/order-snapshot';
+import { buildPendingOrder } from '../lib/order-snapshot';
 import {
   consumeCartSnapshot,
   type CartHtmlSnapshot,
 } from '../lib/cart-html-snapshot';
-import { savePendingOrder } from '../lib/storage';
-import { reportParseOutcome, tryHeal } from '../lib/self-healing';
+import { tryHeal } from '../lib/self-healing';
 import {
   looksLikeCheckoutOrCompletion,
-  decidePageRole,
   isCartPage,
   hasCartPriceSignal,
 } from '../lib/checkout-flow';
@@ -24,17 +17,16 @@ import { showScanNotification } from '../lib/scan-notification';
 import type { SiteConfig } from '../lib/schemas';
 
 /**
- * 결제 캡처 (설계 진화 로그 §1.5 — 결제 클릭 스냅샷 + 완료 페이지 병합).
+ * 결제 캡처 (설계 진화 로그 §1.5 → §1.9 갱신: 완료 페이지 폐기).
  *
  * 흐름:
- *   1) 값싼 게이트로 결제·완료 페이지일 법한지 확인 (다국어 키워드)
+ *   1) 값싼 게이트로 결제 흐름 페이지일 법한지 확인 (다국어 키워드)
  *   2) 국내 사이트 차단 게이트 (해외 직구만 처리)
- *   3) 장바구니 페이지면 마스킹 HTML 누적 (진입 시 + form submit 시) 후 종료
- *      - AI 호출 안 함. 완료 페이지에서 consume하여 extra context로 전달
- *   4) 그 외 페이지: config 확보 (캐시 → 없으면 AI 생성, cart snapshot 있으면 함께 전달)
- *   5) 역할 판정:
- *      - 완료 페이지: 파싱 → 클릭 스냅샷 소비·병합 → 저장 → 자가치유 피드백
- *      - 결제 직전 페이지: payButton 클릭에 리스너 부착 → 클릭 시 스냅샷 덮어쓰기
+ *   3) 장바구니 페이지면 마스킹 HTML 누적 (진입 + form submit) 후 종료 — AI 호출 안 함
+ *   4) 그 외(결제 직전) 페이지: config 확보 (캐시 → 없으면 AI 생성, cart snapshot 동반)
+ *   5) payButton 클릭 시 현재 화면의 상품·가격을 candidate PendingOrder로 즉시 저장.
+ *      orderNumber는 비워 둔다 — 완료 페이지 캡처는 폐기했고, orderNumber·결제성공은
+ *      주문확인 이메일에서 백필한다(§1.9). navigation race 회피 위해 background 경유.
  */
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -74,20 +66,11 @@ export default defineContentScript({
       return;
     }
 
+    // 결제 직전(체크아웃) 페이지: payButton 클릭 시 candidate PendingOrder를 캡처.
+    // 완료 페이지는 더는 보지 않음 — orderNumber·결제성공은 주문확인 이메일 백필(§1.9).
     const config = await resolveConfig(domain);
     if (!config) return;
-
-    const fields = parseWithSelectors(document, config.selectors);
-    const role = decidePageRole({
-      hasOrderNumber: Boolean(fields.orderNumber),
-      hasPayButton: matches(config.selectors.payButton),
-    });
-
-    if (role === 'completion') {
-      await captureCompletion(domain, config, fields);
-    } else if (role === 'prepay') {
-      bindPayClick(domain, config);
-    }
+    bindPayClick(domain, config);
   },
 });
 
@@ -193,29 +176,11 @@ function bindCartFormSubmit(domain: string): void {
   );
 }
 
-/** 완료 페이지: 클릭 스냅샷을 소비·병합해 최종 주문을 저장하고 자가치유에 결과를 보고. */
-async function captureCompletion(
-  domain: string,
-  config: SiteConfig,
-  fields: ReturnType<typeof parseWithSelectors>,
-): Promise<void> {
-  const snap = await consumeSnapshot(domain);
-  const merged = mergeCapture(fields, snap);
-  const order = buildPendingOrder({
-    id: crypto.randomUUID(),
-    domain,
-    url: location.href,
-    fields: merged,
-  });
-  await savePendingOrder(order);
-  // 주문번호를 잡았으면 config가 완료 페이지에서 제 역할을 한 것 → 성공 피드백.
-  await reportParseOutcome(config, Boolean(merged.orderNumber));
-}
-
 /**
- * 결제 직전 페이지: payButton 클릭 순간 현재 화면을 스냅샷으로 덮어쓴다.
- * capture-phase 리스너라 페이지 navigation 전에 동기적으로 DOM을 읽는다.
- * (navigation 직전 async storage write race는 알려진 한계 — 추후 background 메시지로 보강.)
+ * 결제 직전 페이지: payButton 클릭 순간 현재 화면의 상품·가격을 candidate PendingOrder로
+ * 저장한다(orderNumber는 비움 — 이메일 백필, §1.9). capture-phase로 navigation 전에
+ * 동기적으로 DOM을 읽고, 저장은 background로 fire-and-forget — navigation 직전 직접
+ * storage write의 race를 피한다 (CART_HTML_SNAPSHOT과 동일 패턴).
  */
 function bindPayClick(domain: string, config: SiteConfig): void {
   const sel = config.selectors.payButton;
@@ -225,19 +190,19 @@ function bindPayClick(domain: string, config: SiteConfig): void {
     (e) => {
       const target = e.target as Element | null;
       if (!target?.closest(sel)) return;
-      const fields = parseWithSelectors(document, config.selectors);
-      void saveSnapshot(domain, location.href, fields);
+      try {
+        const fields = parseWithSelectors(document, config.selectors);
+        const order = buildPendingOrder({
+          id: crypto.randomUUID(),
+          domain,
+          url: location.href,
+          fields,
+        });
+        chrome.runtime.sendMessage({ type: 'PENDING_ORDER', payload: order });
+      } catch (err) {
+        console.debug('[ZOAS] 결제 클릭 캡처 실패:', err);
+      }
     },
     true, // capture phase
   );
-}
-
-/** 셀렉터가 현재 문서에서 실제로 매칭되는지 (잘못된 셀렉터는 false). */
-function matches(selector: string | undefined): boolean {
-  if (!selector) return false;
-  try {
-    return document.querySelector(selector) !== null;
-  } catch {
-    return false;
-  }
 }

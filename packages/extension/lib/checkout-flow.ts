@@ -1,9 +1,8 @@
 /**
  * 결제 캡처 content script의 순수 판정 로직 (DOM·chrome API 없이 단위 테스트 가능).
  *
- * 페이지 역할 판정 (설계 진화 로그 §1.5):
- *   - 주문번호가 잡히면 → 완료 페이지 (확정 캡처 + 스냅샷 병합)
- *   - 아니고 payButton 셀렉터가 매칭되면 → 결제 직전 페이지 (클릭 스냅샷 부착)
+ * 1차 게이트(결제 흐름 페이지인가)·장바구니 식별·빈 카트 판별을 제공한다.
+ * (완료 페이지 역할 판정 `decidePageRole`은 §1.9로 폐기 — 완료 페이지 캡처를 더는 안 함.)
  */
 
 /**
@@ -59,19 +58,4 @@ export function hasCartPriceSignal(doc: Document): boolean {
   const text = doc.body?.innerText ?? doc.body?.textContent ?? '';
   // 통화기호 + 숫자, 또는 숫자 + 통화 접미사. CJK 통화 단위도 포함.
   return /[¥$€₩£]\s*\d|\d+(?:[,.]\d+)*\s*(?:원|円|元)/.test(text);
-}
-
-export type PageRole = 'completion' | 'prepay' | 'none';
-
-/**
- * 파싱 결과(주문번호 존재) + payButton 셀렉터 매칭으로 페이지 역할 결정.
- * 완료 페이지가 우선 — 주문번호가 잡히면 결제 직전 단계가 아니다.
- */
-export function decidePageRole(args: {
-  hasOrderNumber: boolean;
-  hasPayButton: boolean;
-}): PageRole {
-  if (args.hasOrderNumber) return 'completion';
-  if (args.hasPayButton) return 'prepay';
-  return 'none';
 }
