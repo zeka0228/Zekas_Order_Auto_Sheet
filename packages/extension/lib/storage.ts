@@ -26,6 +26,25 @@ export async function savePendingOrder(order: PendingOrder): Promise<void> {
   await chrome.storage.local.set({ [KEY_ORDERS]: next });
 }
 
+/**
+ * 주문확인 이메일에서 찾은 orderNumber를 후보 주문에 채운다(§1.9 백필).
+ * 대상이 없거나 이미 orderNumber가 있으면 false. needsHumanReview는 상품·가격 기준이라
+ * orderNumber 백필로 바뀌지 않는다 — orderNumber만 채운다.
+ */
+export async function backfillOrderNumber(
+  id: string,
+  orderNumber: string,
+): Promise<boolean> {
+  const existing = await listPendingOrders();
+  const target = existing.find((o) => o.id === id);
+  if (!target || target.orderNumber) return false;
+  const updated = PendingOrderSchema.parse({ ...target, orderNumber });
+  await chrome.storage.local.set({
+    [KEY_ORDERS]: existing.map((o) => (o.id === id ? updated : o)),
+  });
+  return true;
+}
+
 export async function removePendingOrder(id: string): Promise<void> {
   const existing = await listPendingOrders();
   await chrome.storage.local.set({
