@@ -59,12 +59,16 @@ export function looksLikeOrderEmail(subject: string): boolean {
  * 본문/제목에서 주문번호를 추출한다. 다국어 라벨 뒤의 영숫자열(4자 이상)을 집는다.
  * 못 찾으면 undefined. (regex 우선 — 실패 시 호출측에서 AI 폴백.)
  */
+// 라벨과 값 사이의 구분자 — 공백·콜론(반각/전각)·#·닫는 괄호류. asobistore는 【주문 번호】값
+// 처럼 값을 】로 닫으므로 】·]·)·＞도 허용. 값 자체는 영숫자라 이 클래스가 번호를 먹지 않음.
+const SEP = '[\\s:：#\\]】)）＞>]*';
+const VAL = '([A-Za-z0-9][A-Za-z0-9-]{3,})';
 const ORDER_NUMBER_PATTERNS: RegExp[] = [
-  /(?:ご)?注文番号\s*[:：#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/,
-  /order\s*(?:number|no\.?|id|#)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/i,
-  /주문\s*번호\s*[:：#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/,
-  /(?:订单|訂單)\s*[编編号號码碼]*\s*[:：#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/,
-  /(?:confirmation|receipt)\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/i,
+  new RegExp(`(?:ご)?注文番号${SEP}${VAL}`),
+  new RegExp(`order\\s*(?:number|no\\.?|id|#)${SEP}${VAL}`, 'i'),
+  new RegExp(`주문\\s*번호${SEP}${VAL}`),
+  new RegExp(`(?:订单|訂單)\\s*[编編号號码碼]*${SEP}${VAL}`),
+  new RegExp(`(?:confirmation|receipt)\\s*(?:number|no\\.?|#)${SEP}${VAL}`, 'i'),
 ];
 
 export function extractOrderNumber(text: string): string | undefined {
@@ -156,4 +160,24 @@ export function findBackfills(
     }
   }
   return out;
+}
+
+/**
+ * 열람 시 백필 (§1.9): 사용자가 연 메일 한 건에서 번호를 뽑아, **발신 도메인이 일치하는**
+ * 미확정 후보 중 **가장 최근**(capturedAt) 것에 매칭한다.
+ *
+ * findBackfills와 달리 제목 화이트리스트·시간창을 쓰지 않는다 — 사용자가 직접 그 메일을 연
+ * 시점이라 "주문확인인가"의 판단은 본문에서 번호가 실제로 뽑히는지로 갈음하고, 열람은 결제
+ * 후 한참 뒤일 수 있어 시간창이 의미 없기 때문. 후보는 호출측에서 orderNumber 빈 것만 넘긴다.
+ */
+export function backfillFromOpenEmail(
+  orders: BackfillCandidate[],
+  email: EmailSummary,
+): Backfill | null {
+  const orderNumber = extractOrderNumber(`${email.subject}\n${email.bodyText}`);
+  if (!orderNumber) return null;
+  const target = orders
+    .filter((o) => domainMatches(o.domain, email.from))
+    .sort((a, b) => b.capturedAt - a.capturedAt)[0];
+  return target ? { orderId: target.id, orderNumber } : null;
 }

@@ -6,6 +6,7 @@ import {
   domainMatches,
   matchEmailToOrder,
   findBackfills,
+  backfillFromOpenEmail,
   type EmailSummary,
   type BackfillCandidate,
 } from './order-email';
@@ -43,6 +44,9 @@ describe('extractOrderNumber', () => {
     ['订单编号：CN8899001', 'CN8899001'],
     ['訂單號碼: TW55667788', 'TW55667788'],
     ['Confirmation number: CONF1234', 'CONF1234'],
+    // 실제 asobistore 포맷 — 라벨이 【】로 감싸짐 (일본어 원문 / Gmail 한국어 번역 둘 다)
+    ['【注文番号】A10232022070200110', 'A10232022070200110'],
+    ['【주문 번호】A10232022070200110 【주문 일시】2022/07/02', 'A10232022070200110'],
   ])('추출: %s → %s', (text, expected) => {
     expect(extractOrderNumber(text)).toBe(expected);
   });
@@ -179,5 +183,35 @@ describe('findBackfills', () => {
     expect(findBackfills([o1], emails)).toEqual([
       { orderId: 'o1', orderNumber: 'EARLY111' },
     ]);
+  });
+});
+
+describe('backfillFromOpenEmail', () => {
+  const orders: BackfillCandidate[] = [
+    { id: 'old', domain: 'shop.asobistore.jp', capturedAt: 1_000 },
+    { id: 'new', domain: 'shop.asobistore.jp', capturedAt: 9_000 },
+    { id: 'other', domain: 'www.amazon.co.jp', capturedAt: 5_000 },
+  ];
+  const email: EmailSummary = {
+    from: 'ec_support@mail.asobistore.jp',
+    subject: '【아소비 스토어】상품 발송의 소식：(A10232022070200110)',
+    receivedAt: 0,
+    bodyText: '【주문자】… 【주문 번호】A10232022070200110 【주문 일시】2022/07/02',
+  };
+
+  it('도메인 일치하는 미확정 후보 중 가장 최근 것에 번호 매칭', () => {
+    expect(backfillFromOpenEmail(orders, email)).toEqual({
+      orderId: 'new',
+      orderNumber: 'A10232022070200110',
+    });
+  });
+
+  it('번호를 못 뽑으면 null', () => {
+    expect(backfillFromOpenEmail(orders, { ...email, subject: '안내', bodyText: '본문' })).toBeNull();
+  });
+
+  it('도메인 일치 후보가 없으면 null', () => {
+    const amazonOnly = orders.filter((o) => o.id === 'other'); // 메일은 asobistore인데 후보는 amazon뿐
+    expect(backfillFromOpenEmail(amazonOnly, email)).toBeNull();
   });
 });
