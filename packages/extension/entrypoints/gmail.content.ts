@@ -24,7 +24,13 @@ export default defineContentScript({
       const pending = (await listPendingOrders()).filter((o) => !o.orderNumber);
       if (pending.length === 0) return;
       const hit = backfillFromOpenEmail(
-        pending.map((o) => ({ id: o.id, domain: o.domain, capturedAt: o.capturedAt })),
+        pending.map((o) => ({
+          id: o.id,
+          domain: o.domain,
+          capturedAt: o.capturedAt,
+          price: o.price,
+          productName: o.productName,
+        })),
         email,
       );
       if (hit) chrome.runtime.sendMessage({ type: 'ORDER_BACKFILL', payload: hit });

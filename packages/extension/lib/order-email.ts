@@ -27,6 +27,10 @@ export interface BackfillCandidate {
   domain: string;
   /** 결제하기 클릭 시각 (epoch ms). */
   capturedAt: number;
+  /** 캡처된 가격 — 동일 도메인 다중 주문 구별용(금액 대조). */
+  price?: { amount: number; currency: string };
+  /** 캡처된 상품명 — 금액으로도 안 갈리면 본문 등장 여부로 구별. */
+  productName?: string;
 }
 
 export interface Backfill {
@@ -162,22 +166,54 @@ export function findBackfills(
   return out;
 }
 
+/** 본문에서 통화에 인접한 금액들을 추출(천단위 콤마 제거). 동일 도메인 다중 주문 구별용. */
+export function extractAmounts(text: string): number[] {
+  // 통화기호 + 숫자, 또는 숫자 + 통화 접미사(원/円/元/엔 등). 통화 인접만 — 날짜·우편번호 배제.
+  const re = /(?:[¥$€₩£]\s*)([\d][\d,]*(?:\.\d+)?)|([\d][\d,]*(?:\.\d+)?)\s*(?:원|엔|円|圓|圆|元)/g;
+  const out: number[] = [];
+  for (const m of text.matchAll(re)) {
+    const raw = m[1] ?? m[2];
+    if (!raw) continue;
+    const n = Number(raw.replace(/,/g, ''));
+    if (Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+
 /**
- * 열람 시 백필 (§1.9): 사용자가 연 메일 한 건에서 번호를 뽑아, **발신 도메인이 일치하는**
- * 미확정 후보 중 **가장 최근**(capturedAt) 것에 매칭한다.
+ * 열람 시 백필 (§1.9): 사용자가 연 메일 한 건에서 번호를 뽑아 후보 주문에 매칭한다.
+ *
+ * 매칭 캐스케이드 (발신 도메인 일치 후보 안에서, 복수면 다음 단계로):
+ *   1) 도메인 일치 후보로 시작 (없으면 null).
+ *   2) 복수면 **금액 대조** — 본문 금액 목록에 후보 price.amount가 든 것만. (1건이면 확정)
+ *   3) 그래도 복수면 **상품명 대조** — 후보 productName이 본문에 등장하는 것만.
+ *   4) 끝까지 복수면 **가장 최근**(capturedAt).
+ * 각 단계는 결과가 0이면 그 단계를 건너뛴다(과도하게 비우지 않음).
  *
  * findBackfills와 달리 제목 화이트리스트·시간창을 쓰지 않는다 — 사용자가 직접 그 메일을 연
- * 시점이라 "주문확인인가"의 판단은 본문에서 번호가 실제로 뽑히는지로 갈음하고, 열람은 결제
- * 후 한참 뒤일 수 있어 시간창이 의미 없기 때문. 후보는 호출측에서 orderNumber 빈 것만 넘긴다.
+ * 시점이라 "주문확인인가"는 본문에서 번호가 뽑히는지로 갈음하고, 열람은 결제 후 한참 뒤일 수
+ * 있어 시간창이 의미 없기 때문. 후보는 호출측에서 orderNumber 빈 것만 넘긴다.
  */
 export function backfillFromOpenEmail(
   orders: BackfillCandidate[],
   email: EmailSummary,
 ): Backfill | null {
-  const orderNumber = extractOrderNumber(`${email.subject}\n${email.bodyText}`);
+  const text = `${email.subject}\n${email.bodyText}`;
+  const orderNumber = extractOrderNumber(text);
   if (!orderNumber) return null;
-  const target = orders
-    .filter((o) => domainMatches(o.domain, email.from))
-    .sort((a, b) => b.capturedAt - a.capturedAt)[0];
+
+  let set = orders.filter((o) => domainMatches(o.domain, email.from));
+  if (set.length === 0) return null;
+
+  if (set.length > 1) {
+    const amounts = extractAmounts(text);
+    const byAmount = set.filter((o) => o.price && amounts.includes(o.price.amount));
+    if (byAmount.length >= 1) set = byAmount;
+  }
+  if (set.length > 1) {
+    const byProduct = set.filter((o) => o.productName && text.includes(o.productName));
+    if (byProduct.length >= 1) set = byProduct;
+  }
+  const target = [...set].sort((a, b) => b.capturedAt - a.capturedAt)[0];
   return target ? { orderId: target.id, orderNumber } : null;
 }

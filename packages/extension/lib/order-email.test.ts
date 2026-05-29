@@ -7,6 +7,7 @@ import {
   matchEmailToOrder,
   findBackfills,
   backfillFromOpenEmail,
+  extractAmounts,
   type EmailSummary,
   type BackfillCandidate,
 } from './order-email';
@@ -213,5 +214,48 @@ describe('backfillFromOpenEmail', () => {
   it('도메인 일치 후보가 없으면 null', () => {
     const amazonOnly = orders.filter((o) => o.id === 'other'); // 메일은 asobistore인데 후보는 amazon뿐
     expect(backfillFromOpenEmail(amazonOnly, email)).toBeNull();
+  });
+});
+
+describe('extractAmounts', () => {
+  it('통화 인접 금액만 추출(콤마 제거), 날짜·우편번호 등 제외', () => {
+    const text = '상품 금액 합계：3,900엔 송료：660엔 지불 금액：4,560엔 주문일 2022/07/02 우편 112-0002';
+    expect(extractAmounts(text)).toEqual([3900, 660, 4560]);
+  });
+  it('기호 통화도 추출', () => {
+    expect(extractAmounts('합계 ¥300 / $30.00 / ₩30,000')).toEqual([300, 30, 30000]);
+  });
+});
+
+describe('backfillFromOpenEmail — 동일 도메인 다중 주문 구별 (금액→상품명→최신)', () => {
+  const email: EmailSummary = {
+    from: 'ec_support@mail.asobistore.jp',
+    subject: '상품 발송 안내',
+    receivedAt: 0,
+    bodyText: '【주문 번호】A777 상품 금액 합계：3,900엔 지불 금액：4,560엔 사즈카 캡',
+  };
+
+  it('금액으로 구별 — 최신이 아니어도 금액 맞는 후보 선택', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'cheap-old', domain: 'shop.asobistore.jp', capturedAt: 1_000, price: { amount: 3900, currency: 'JPY' } },
+      { id: 'pricey-new', domain: 'shop.asobistore.jp', capturedAt: 9_000, price: { amount: 12000, currency: 'JPY' } },
+    ];
+    expect(backfillFromOpenEmail(orders, email)).toEqual({ orderId: 'cheap-old', orderNumber: 'A777' });
+  });
+
+  it('금액 동률이면 상품명으로 구별', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'capA', domain: 'shop.asobistore.jp', capturedAt: 1_000, price: { amount: 3900, currency: 'JPY' }, productName: '사즈카 캡' },
+      { id: 'capB', domain: 'shop.asobistore.jp', capturedAt: 9_000, price: { amount: 3900, currency: 'JPY' }, productName: '다른 상품' },
+    ];
+    expect(backfillFromOpenEmail(orders, email)).toEqual({ orderId: 'capA', orderNumber: 'A777' });
+  });
+
+  it('금액·상품명으로도 못 가리면 가장 최근', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'old', domain: 'shop.asobistore.jp', capturedAt: 1_000 },
+      { id: 'new', domain: 'shop.asobistore.jp', capturedAt: 9_000 },
+    ];
+    expect(backfillFromOpenEmail(orders, email)).toEqual({ orderId: 'new', orderNumber: 'A777' });
   });
 });
