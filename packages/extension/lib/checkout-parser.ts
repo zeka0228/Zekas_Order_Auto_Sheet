@@ -1,10 +1,9 @@
 /**
- * 결제 페이지/완료 페이지에서 config 셀렉터로 주문 필드를 추출한다.
+ * config 셀렉터로 결제 직전(체크아웃)·장바구니 페이지에서 주문 필드를 추출한다.
  *
- * 캡처는 두 시점이 같은 파서를 공유한다 (설계 진화 로그 §1.5):
- *   - 결제하기 클릭 시점 → 상품·가격 (주문번호 없음)
- *   - 완료 페이지 → 주문번호 (+ 가능하면 데이터)
- * 두 결과는 order-snapshot의 mergeCapture로 합쳐진다.
+ * (설계 진화 로그 §1.9) payButton 클릭 시점에 상품·가격을 뽑아 candidate PendingOrder를
+ * 만든다. orderNumber는 완료 페이지가 아니라 주문확인 이메일에서 백필하므로, orderNumber
+ * 셀렉터가 config에 있어도 capture 시점엔 보통 비어 있다 — 파싱은 시도하되 의존하지 않는다.
  */
 import { detectCurrency } from './html-masker';
 import type { PendingOrder } from './schemas';

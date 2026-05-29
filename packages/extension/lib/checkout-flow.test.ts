@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   looksLikeCheckoutOrCompletion,
-  decidePageRole,
   isCartPage,
   hasCartPriceSignal,
 } from './checkout-flow';
@@ -117,20 +116,5 @@ describe('hasCartPriceSignal — 빈 카트 vs 셀렉터 stale 구분용', () =>
 
   it('숫자만 있고 통화 표기 없으면 false (전화번호·재고 등)', () => {
     expect(hasCartPriceSignal(docWithText('재고 12개, 평점 5'))).toBe(false);
-  });
-});
-
-describe('decidePageRole', () => {
-  it('주문번호가 있으면 completion (payButton 여부 무관)', () => {
-    expect(decidePageRole({ hasOrderNumber: true, hasPayButton: false })).toBe('completion');
-    expect(decidePageRole({ hasOrderNumber: true, hasPayButton: true })).toBe('completion');
-  });
-
-  it('주문번호 없고 payButton 있으면 prepay', () => {
-    expect(decidePageRole({ hasOrderNumber: false, hasPayButton: true })).toBe('prepay');
-  });
-
-  it('둘 다 없으면 none', () => {
-    expect(decidePageRole({ hasOrderNumber: false, hasPayButton: false })).toBe('none');
   });
 });

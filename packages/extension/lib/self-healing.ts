@@ -1,4 +1,4 @@
-import { generateConfig, reportFailure, reportSuccess } from './config-client';
+import { generateConfig, reportFailure } from './config-client';
 import { sanitizeHTML } from './html-masker';
 import type { SiteConfig } from './schemas';
 
@@ -17,12 +17,4 @@ export async function tryHeal(args: {
   }
   const sanitized = sanitizeHTML(args.root);
   return generateConfig(args.domain, args.type, sanitized);
-}
-
-export async function reportParseOutcome(
-  config: SiteConfig,
-  ok: boolean,
-): Promise<void> {
-  if (ok) await reportSuccess(config.id);
-  else await reportFailure(config.id);
 }

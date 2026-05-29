@@ -1,12 +1,17 @@
 import { saveCartSnapshot, type CartHtmlSnapshot } from '../lib/cart-html-snapshot';
+import { savePendingOrder, backfillOrderNumber } from '../lib/storage';
+import type { PendingOrder } from '../lib/schemas';
 
 /**
  * 메시지 페이로드 타입.
  * content script → background로만 흐른다 (background는 응답 없음, fire-and-forget).
+ * pending_orders 쓰기는 background 단일 주체로 모아 동시 read-modify-write race를 피한다.
  */
 type RuntimeMessage =
   | { type: 'PING' }
-  | { type: 'CART_HTML_SNAPSHOT'; payload: CartHtmlSnapshot };
+  | { type: 'CART_HTML_SNAPSHOT'; payload: CartHtmlSnapshot }
+  | { type: 'PENDING_ORDER'; payload: PendingOrder }
+  | { type: 'ORDER_BACKFILL'; payload: { orderId: string; orderNumber: string } };
 
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
@@ -22,6 +27,15 @@ export default defineBackground(() => {
         // content script가 페이지 navigation 직전에 보내므로 fire-and-forget.
         // chrome.storage.local.set이 비동기지만 background는 navigation 영향 안 받음 → 안전.
         void saveCartSnapshot(msg.payload);
+        return false;
+      case 'PENDING_ORDER':
+        // payButton 클릭 직후 content script가 navigation 전에 보냄 → fire-and-forget.
+        // 완료 페이지 폐기(§1.9) 후 후보 주문은 이 시점에 저장되고 orderNumber는 이메일 백필.
+        void savePendingOrder(msg.payload);
+        return false;
+      case 'ORDER_BACKFILL':
+        // gmail content script가 주문확인 메일에서 찾은 orderNumber를 후보 주문에 채움(§1.9).
+        void backfillOrderNumber(msg.payload.orderId, msg.payload.orderNumber);
         return false;
       default:
         return false;
