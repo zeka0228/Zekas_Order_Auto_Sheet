@@ -32,6 +32,14 @@ describe('showScanNotification', () => {
     expect(document.getElementById(TOAST_ID)?.textContent).toContain('스캔 실패');
   });
 
+  it('textOverride를 주면 상태 기본 문구 대신 그 문구를 표시 (emoji는 상태 유지)', () => {
+    showScanNotification('error', 0, '캡처함 · 장바구니 페이지인지 확인 필요');
+    const toast = document.getElementById(TOAST_ID);
+    expect(toast?.textContent).toContain('캡처함 · 장바구니 페이지인지 확인 필요');
+    expect(toast?.textContent).not.toContain('스캔 실패');
+    expect(toast?.textContent).toContain('⚠');
+  });
+
   it('연속 호출 시 이전 toast를 갈아끼움 (DOM에 항상 1개만)', () => {
     showScanNotification('recognized', 0);
     showScanNotification('scanning', 0);
