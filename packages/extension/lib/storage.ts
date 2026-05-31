@@ -14,12 +14,14 @@ type Area = chrome.storage.StorageArea;
 
 /**
  * 미확정 후보(orderNumber 없는 candidate) TTL — 결제 클릭 후 이 기간 내 이메일 백필이 안 되면
- * 미결제·이탈로 보고 폐기한다(확정 주문은 보존). cart 스냅샷(24h)보다 길게 잡는다: 열람-시-백필(§1.9)은
- * 사용자가 주문확인 메일을 *열어야* 발동하는데, 확인 메일은 분 내 도착해도 Gmail을 며칠 뒤 열 수 있어
- * 너무 짧으면 백필 전에 후보가 사라진다. 7일이면 그 사이 한 번은 메일을 열 여지가 있고, 그 뒤로도
- * 안 채워졌으면 실패·이탈로 보는 게 안전하다.
+ * 미결제·이탈로 보고 폐기한다(확정 주문은 보존). cart 스냅샷과 동일하게 24h(§1.9 MVP 결정).
+ *
+ * 트레이드오프(인지하고 채택): 열람-시-백필(§1.9)은 사용자가 주문확인 메일을 *열어야* 발동하므로,
+ * 결제 후 24h 안에 Gmail에서 그 메일을 열지 않으면 후보가 먼저 청소돼 orderNumber 백필이 안 된다.
+ * 즉 백필은 "당일 메일 확인" 사용 패턴에 묶인다. 누적·정리 단순함을 우선해 24h로 시작하고, 백필
+ * 실패가 잦으면 상향 검토.
  */
-export const CANDIDATE_TTL_MS = 7 * 24 * 60 * 60_000;
+export const CANDIDATE_TTL_MS = 24 * 60 * 60_000;
 
 export async function listPendingOrders(area: Area = chrome.storage.local): Promise<PendingOrder[]> {
   const raw = await area.get(KEY_ORDERS);

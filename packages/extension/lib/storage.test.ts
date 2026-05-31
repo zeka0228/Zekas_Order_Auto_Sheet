@@ -95,8 +95,8 @@ describe('prunePendingOrders — candidate TTL 청소 (§1.9)', () => {
     expect(area.setCalls).toBe(0);
   });
 
-  it('기본 TTL은 7일', () => {
-    expect(CANDIDATE_TTL_MS).toBe(7 * 24 * 60 * 60_000);
+  it('기본 TTL은 24시간', () => {
+    expect(CANDIDATE_TTL_MS).toBe(24 * 60 * 60_000);
   });
 });
 
