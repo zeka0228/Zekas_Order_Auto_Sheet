@@ -1,5 +1,5 @@
-import { extractFullBodyText, findFullMessageUrl, scrapeOpenEmail } from '../lib/gmail-scrape';
-import { backfillFromOpenEmail, domainMatches, extractOrderNumber } from '../lib/order-email';
+import { backfillOnOpenEmail } from '../lib/gmail-backfill';
+import { extractFullBodyText } from '../lib/gmail-scrape';
 import { listPendingOrders } from '../lib/storage';
 
 /**
@@ -35,8 +35,6 @@ export default defineContentScript({
     }
 
     async function tryBackfill(): Promise<void> {
-      const email = scrapeOpenEmail(document);
-      if (!email) return;
       const pending = (await listPendingOrders()).filter((o) => !o.orderNumber);
       if (pending.length === 0) return;
       const candidates = pending.map((o) => ({
@@ -47,21 +45,8 @@ export default defineContentScript({
         productName: o.productName,
       }));
 
-      let hit = backfillFromOpenEmail(candidates, email);
-
-      // 본문이 잘렸고(=전체 메일 보기 링크 존재) 부분 본문에서 번호를 못 뽑았으면 전체 본문을 받아
-      // 재시도 (§1.9 후속). 도메인 일치 후보가 있을 때만 fetch — 없으면 전체 본문도 백필 대상이 없어
-      // 헛수고다. asobistore는 번호가 앞부분이라 부분 본문에서 이미 잡히지만, 번호가 클립 뒤에 오는
-      // 다른 쇼핑몰을 위한 견고화.
-      if (!hit && !extractOrderNumber(`${email.subject}\n${email.bodyText}`)) {
-        const fullUrl = findFullMessageUrl(document);
-        const hasDomainHit = candidates.some((c) => domainMatches(c.domain, email.from));
-        if (fullUrl && hasDomainHit) {
-          const fullText = await fetchFullBodyText(fullUrl);
-          if (fullText) hit = backfillFromOpenEmail(candidates, { ...email, bodyText: fullText });
-        }
-      }
-
+      // 오케스트레이션(클립 감지·전체 본문 재시도 포함)은 lib/gmail-backfill로 분리해 단위 테스트한다.
+      const hit = await backfillOnOpenEmail({ doc: document, candidates, fetchFullText: fetchFullBodyText });
       if (hit) chrome.runtime.sendMessage({ type: 'ORDER_BACKFILL', payload: hit });
     }
 
