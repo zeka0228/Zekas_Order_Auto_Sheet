@@ -1,5 +1,12 @@
 import { saveCartSnapshot, type CartHtmlSnapshot } from '../lib/cart-html-snapshot';
-import { backfillOrderNumber, prunePendingOrders, savePendingOrder } from '../lib/storage';
+import {
+  backfillOrderNumber,
+  countMissingOrderNumber,
+  listPendingOrders,
+  prunePendingOrders,
+  savePendingOrder,
+  setOrderNumber,
+} from '../lib/storage';
 import type { PendingOrder } from '../lib/schemas';
 
 /**
@@ -11,7 +18,8 @@ type RuntimeMessage =
   | { type: 'PING' }
   | { type: 'CART_HTML_SNAPSHOT'; payload: CartHtmlSnapshot }
   | { type: 'PENDING_ORDER'; payload: PendingOrder }
-  | { type: 'ORDER_BACKFILL'; payload: { orderId: string; orderNumber: string } };
+  | { type: 'ORDER_BACKFILL'; payload: { orderId: string; orderNumber: string } }
+  | { type: 'ORDER_SET_NUMBER'; payload: { orderId: string; orderNumber: string } };
 
 /**
  * pending_orders는 여러 메시지(저장·백필)와 TTL 청소가 read-modify-write하므로, 모든 변경을
@@ -25,15 +33,37 @@ function enqueueWrite(task: () => Promise<unknown>): void {
   });
 }
 
+/**
+ * 툴바 아이콘 배지에 "주문번호 미입력 후보 수"를 빨간 배지로 띄운다(§1.9 후속 — 수동 입력 유도).
+ * pending_orders 변경 때마다 갱신해 메일 백필로 채워지면 자동으로 줄고, 0이면 배지를 지운다.
+ * best-effort라 실패는 삼킨다(배지는 부가 안내일 뿐 데이터 정합성과 무관).
+ */
+async function refreshBadge(): Promise<void> {
+  try {
+    const missing = countMissingOrderNumber(await listPendingOrders());
+    await chrome.action.setBadgeText({ text: missing > 0 ? String(missing) : '' });
+    if (missing > 0) {
+      await chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+    }
+  } catch (e) {
+    console.error('[ZOAS] badge refresh failed:', e);
+  }
+}
+
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
     console.log('[ZOAS] installed:', details.reason);
-    enqueueWrite(() => prunePendingOrders()); // 설치·업데이트 시 stale 후보 청소
+    enqueueWrite(() => prunePendingOrders().then(refreshBadge)); // 설치·업데이트 시 stale 후보 청소
   });
 
   // 브라우저(프로필) 시작 시에도 청소 — 장기 미확정 후보가 무기한 쌓이지 않게(§1.9 candidate 정리).
   chrome.runtime.onStartup.addListener(() => {
-    enqueueWrite(() => prunePendingOrders());
+    enqueueWrite(() => prunePendingOrders().then(refreshBadge));
+  });
+
+  // pending_orders가 바뀔 때마다 배지 갱신 — 저장·백필·청소·수동 입력 어느 경로든 단일 지점에서 반영.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.pending_orders) void refreshBadge();
   });
 
   chrome.runtime.onMessage.addListener((msg: RuntimeMessage, _sender, sendResponse) => {
@@ -56,6 +86,11 @@ export default defineBackground(() => {
       case 'ORDER_BACKFILL':
         // gmail content script가 주문확인 메일에서 찾은 orderNumber를 후보 주문에 채움(§1.9).
         enqueueWrite(() => backfillOrderNumber(msg.payload.orderId, msg.payload.orderNumber));
+        return false;
+      case 'ORDER_SET_NUMBER':
+        // popup에서 사용자가 직접 입력한 orderNumber를 후보에 설정(§1.9 후속, regex 백필 실패 시).
+        // 배지·UI는 storage.onChanged로 자동 갱신되므로 여기선 쓰기만 큐에 넣는다.
+        enqueueWrite(() => setOrderNumber(msg.payload.orderId, msg.payload.orderNumber));
         return false;
       default:
         return false;
