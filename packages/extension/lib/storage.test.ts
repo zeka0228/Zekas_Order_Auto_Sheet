@@ -6,7 +6,7 @@ import {
   prunePendingOrders,
   setOrderNumber,
 } from './storage';
-import type { PendingOrder } from './schemas';
+import { SettingsSchema, type PendingOrder } from './schemas';
 
 /** chrome.storage.StorageArea 페이크 — set 호출 횟수도 센다(불필요한 쓰기 회피 검증용). */
 function fakeArea(initial: PendingOrder[] = []): chrome.storage.StorageArea & {
@@ -163,6 +163,21 @@ describe('countMissingOrderNumber — 배지 카운트', () => {
 
   it('빈 목록은 0', () => {
     expect(countMissingOrderNumber([])).toBe(0);
+  });
+});
+
+describe('SettingsSchema — 온보딩/Gmail 기본값', () => {
+  it('빈 객체 parse 시 미온보딩·Gmail 비활성(메일 e2e 안 돌림)', () => {
+    const s = SettingsSchema.parse({});
+    expect(s.onboarded).toBe(false);
+    expect(s.gmailOrderEmails).toBe(false);
+    expect(s.proEnabled).toBe(false);
+  });
+
+  it('온보딩에서 Gmail "예" 선택값을 보존', () => {
+    const s = SettingsSchema.parse({ onboarded: true, gmailOrderEmails: true });
+    expect(s.onboarded).toBe(true);
+    expect(s.gmailOrderEmails).toBe(true);
   });
 });
 

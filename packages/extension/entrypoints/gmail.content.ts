@@ -1,6 +1,6 @@
 import { backfillOnOpenEmail } from '../lib/gmail-backfill';
 import { extractFullBodyText } from '../lib/gmail-scrape';
-import { listPendingOrders } from '../lib/storage';
+import { getSettings, listPendingOrders } from '../lib/storage';
 
 /**
  * Gmail 열람 시 orderNumber 백필 (설계 진화 로그 §1.9).
@@ -17,6 +17,11 @@ export default defineContentScript({
   runAt: 'document_idle',
   async main() {
     if (window.top !== window) return; // top frame만
+
+    // 온보딩에서 "배송대행 주문확인 메일을 Gmail로 받지 않음"을 고른 사용자는 메일 e2e를 돌리지 않는다
+    // (주문번호는 popup 수동 입력에 의존). 설정 변경 후엔 Gmail 탭을 새로고침해야 반영된다.
+    const settings = await getSettings();
+    if (!settings.gmailOrderEmails) return;
 
     /**
      * 전체-메일 뷰(view=lg) URL을 fetch해 잘리지 않은 본문 텍스트를 받는다 (§1.9 후속).

@@ -54,6 +54,10 @@ export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
     console.log('[ZOAS] installed:', details.reason);
     enqueueWrite(() => prunePendingOrders().then(refreshBadge)); // 설치·업데이트 시 stale 후보 청소
+    // 첫 설치 시 온보딩(배송대행 메일을 Gmail로 받는지) 질문을 위해 옵션 페이지를 연다.
+    if (details.reason === 'install') {
+      chrome.runtime.openOptionsPage();
+    }
   });
 
   // 브라우저(프로필) 시작 시에도 청소 — 장기 미확정 후보가 무기한 쌓이지 않게(§1.9 candidate 정리).

@@ -38,5 +38,12 @@ export const SettingsSchema = z.object({
   proEnabled: z.boolean().default(false),
   anthropicApiKey: z.string().optional(),
   workerBaseUrl: z.string().url().optional(),
+  /** 온보딩(첫 설치 안내) 완료 여부. false면 options에서 질문 카드를 띄운다. */
+  onboarded: z.boolean().default(false),
+  /**
+   * 배송대행 주문확인 메일을 Gmail로 받는가. true일 때만 Gmail 열람-시 백필(§1.9)을 동작시킨다.
+   * false(또는 미온보딩 기본)면 메일 e2e를 돌리지 않고 주문번호는 popup 수동 입력에 의존한다.
+   */
+  gmailOrderEmails: z.boolean().default(false),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
