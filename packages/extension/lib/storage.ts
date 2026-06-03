@@ -58,6 +58,36 @@ export async function backfillOrderNumber(
   return true;
 }
 
+/**
+ * 사용자가 직접 입력한 주문번호를 후보에 설정한다(§1.9 후속 — 제목·본문 regex 백필이 실패해
+ * popup에서 수동 입력하는 경로). backfillOrderNumber와 달리 이미 값이 있어도 덮어쓴다(사용자
+ * 명시 정정 허용). 입력을 trim하고, 빈 문자열이거나 대상이 없으면 false.
+ *
+ * background 직렬 큐에서만 호출해 read-modify-write race를 피한다(다른 쓰기와 동일 불변식).
+ */
+export async function setOrderNumber(
+  id: string,
+  orderNumber: string,
+  area: Area = chrome.storage.local,
+): Promise<boolean> {
+  const trimmed = orderNumber.trim();
+  if (!trimmed) return false;
+  const existing = await listPendingOrders(area);
+  const target = existing.find((o) => o.id === id);
+  if (!target) return false;
+  const updated = PendingOrderSchema.parse({ ...target, orderNumber: trimmed });
+  await area.set({ [KEY_ORDERS]: existing.map((o) => (o.id === id ? updated : o)) });
+  return true;
+}
+
+/**
+ * orderNumber가 아직 비어있는(= 자동 백필 안 됐거나 추출 실패해 수동 입력이 필요한) 후보 수.
+ * 툴바 아이콘 배지 숫자에 쓴다. 순수 함수라 단위 테스트로 고정.
+ */
+export function countMissingOrderNumber(orders: PendingOrder[]): number {
+  return orders.filter((o) => !o.orderNumber).length;
+}
+
 export async function removePendingOrder(id: string): Promise<void> {
   const existing = await listPendingOrders();
   await chrome.storage.local.set({

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CANDIDATE_TTL_MS, listPendingOrders, prunePendingOrders } from './storage';
+import {
+  CANDIDATE_TTL_MS,
+  countMissingOrderNumber,
+  listPendingOrders,
+  prunePendingOrders,
+  setOrderNumber,
+} from './storage';
 import type { PendingOrder } from './schemas';
 
 /** chrome.storage.StorageArea 페이크 — set 호출 횟수도 센다(불필요한 쓰기 회피 검증용). */
@@ -97,6 +103,66 @@ describe('prunePendingOrders — candidate TTL 청소 (§1.9)', () => {
 
   it('기본 TTL은 24시간', () => {
     expect(CANDIDATE_TTL_MS).toBe(24 * 60 * 60_000);
+  });
+});
+
+describe('setOrderNumber — 수동 입력 (§1.9 후속)', () => {
+  it('빈 후보에 입력하면 orderNumber를 채우고 true', async () => {
+    const area = fakeArea([order({ id: 'o1' })]);
+    expect(await setOrderNumber('o1', 'A-123', area)).toBe(true);
+    expect(ordersIn(area)[0]?.orderNumber).toBe('A-123');
+  });
+
+  it('입력값 앞뒤 공백을 trim한다', async () => {
+    const area = fakeArea([order({ id: 'o1' })]);
+    await setOrderNumber('o1', '  A-123  ', area);
+    expect(ordersIn(area)[0]?.orderNumber).toBe('A-123');
+  });
+
+  it('이미 값이 있어도 덮어쓴다(사용자 명시 정정)', async () => {
+    const area = fakeArea([order({ id: 'o1', orderNumber: 'WRONG' })]);
+    expect(await setOrderNumber('o1', 'A-123', area)).toBe(true);
+    expect(ordersIn(area)[0]?.orderNumber).toBe('A-123');
+  });
+
+  it('빈 문자열·공백뿐인 입력은 거부하고 false (set 없음)', async () => {
+    const area = fakeArea([order({ id: 'o1' })]);
+    expect(await setOrderNumber('o1', '   ', area)).toBe(false);
+    expect(area.setCalls).toBe(0);
+    expect(ordersIn(area)[0]?.orderNumber).toBeUndefined();
+  });
+
+  it('대상 id가 없으면 false (set 없음)', async () => {
+    const area = fakeArea([order({ id: 'o1' })]);
+    expect(await setOrderNumber('nope', 'A-123', area)).toBe(false);
+    expect(area.setCalls).toBe(0);
+  });
+
+  it('대상만 바꾸고 다른 후보는 건드리지 않는다', async () => {
+    const area = fakeArea([order({ id: 'o1' }), order({ id: 'o2' })]);
+    await setOrderNumber('o2', 'A-2', area);
+    expect(ordersIn(area).find((o) => o.id === 'o1')?.orderNumber).toBeUndefined();
+    expect(ordersIn(area).find((o) => o.id === 'o2')?.orderNumber).toBe('A-2');
+  });
+});
+
+describe('countMissingOrderNumber — 배지 카운트', () => {
+  it('orderNumber 빈 후보만 센다', () => {
+    expect(
+      countMissingOrderNumber([
+        order({ id: 'a' }),
+        order({ id: 'b', orderNumber: 'X-1' }),
+        order({ id: 'c' }),
+      ]),
+    ).toBe(2);
+  });
+
+  it('빈 문자열 orderNumber도 미입력으로 센다', () => {
+    expect(countMissingOrderNumber([order({ id: 'a', orderNumber: '' })])).toBe(1);
+  });
+
+  it('빈 목록은 0', () => {
+    expect(countMissingOrderNumber([])).toBe(0);
   });
 });
 
