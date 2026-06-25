@@ -227,6 +227,69 @@ describe('extractAmounts', () => {
   });
 });
 
+describe('D3 generalize — 미국/중국 2번째 사이트 전 경로 (asobistore 외)', () => {
+  // 일·미·중 권역 generalize 검증: 일본 외 구조가 다른 사이트(영어/$, 중국어/元)에서도
+  // extractOrderNumber + domainMatches + 금액·상품명 구별이 합쳐져 동작함을 고정한다.
+
+  it('US 사이트: 영어 메일·USD·"Order number" 라벨로 금액 구별 백필', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'us-129', domain: 'shop.bigstore.com', capturedAt: 1_000, price: { amount: 129.99, currency: 'USD' } },
+      { id: 'us-59', domain: 'shop.bigstore.com', capturedAt: 9_000, price: { amount: 59.5, currency: 'USD' } },
+    ];
+    const email: EmailSummary = {
+      from: 'orders@bigstore.com',
+      subject: 'Your BigStore order confirmation',
+      receivedAt: 0,
+      bodyText: 'Thank you for your order. Order number: BS-2026-0099. Order total: $129.99',
+    };
+    // 최신은 us-59지만 본문 금액($129.99)이 us-129와 맞으므로 us-129 선택.
+    expect(backfillFromOpenEmail(orders, email)).toEqual({ orderId: 'us-129', orderNumber: 'BS-2026-0099' });
+  });
+
+  it('US 사이트: Amazon식 하이픈 주문번호도 추출', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'a', domain: 'www.bigstore.com', capturedAt: 1_000 },
+    ];
+    const email: EmailSummary = {
+      from: 'auto-confirm@bigstore.com',
+      subject: 'Your order has shipped',
+      receivedAt: 0,
+      bodyText: 'Order #112-3456789-1234567 will arrive soon.',
+    };
+    expect(backfillFromOpenEmail(orders, email)).toEqual({
+      orderId: 'a',
+      orderNumber: '112-3456789-1234567',
+    });
+  });
+
+  it('CN 사이트: 중국어 메일·订单编号·元 금액 동률 → 상품명으로 구별', () => {
+    const orders: BackfillCandidate[] = [
+      { id: 'cn-earbuds', domain: 'item.jd.com', capturedAt: 1_000, price: { amount: 88, currency: 'CNY' }, productName: '蓝牙耳机' },
+      { id: 'cn-case', domain: 'item.jd.com', capturedAt: 9_000, price: { amount: 88, currency: 'CNY' }, productName: '手机壳' },
+    ];
+    const email: EmailSummary = {
+      from: 'service@jd.com',
+      subject: '订单确认',
+      receivedAt: 0,
+      bodyText: '感谢您的购买。订单编号：JD20260625001。商品金额：88元。蓝牙耳机 1件',
+    };
+    // 금액(88) 동률 → 본문에 등장하는 상품명 '蓝牙耳机' 후보 선택.
+    expect(backfillFromOpenEmail(orders, email)).toEqual({ orderId: 'cn-earbuds', orderNumber: 'JD20260625001' });
+  });
+
+  it('CN 사이트: .com.cn 도메인도 핵심 라벨 매칭', () => {
+    expect(domainMatches('item.tmall.com.cn', 'service@tmall.com.cn')).toBe(true);
+    expect(mainDomainLabel('item.tmall.com.cn')).toBe('tmall');
+  });
+
+  it('US/CN 주문확인 제목 화이트리스트 통과', () => {
+    expect(looksLikeOrderEmail('Your order confirmation')).toBe(true);
+    expect(looksLikeOrderEmail('Order receipt from BigStore')).toBe(true);
+    expect(looksLikeOrderEmail('订单确认')).toBe(true);
+    expect(looksLikeOrderEmail('感谢您的购买（订单）')).toBe(true);
+  });
+});
+
 describe('backfillFromOpenEmail — 동일 도메인 다중 주문 구별 (금액→상품명→최신)', () => {
   const email: EmailSummary = {
     from: 'ec_support@mail.asobistore.jp',
