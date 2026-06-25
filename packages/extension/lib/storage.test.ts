@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANDIDATE_TTL_MS,
+  clearRetryState,
   countMissingOrderNumber,
+  findAutoTabByQuery,
+  findAutoTabByTabId,
+  getAutoTabs,
+  getRetryStates,
   listPendingOrders,
   prunePendingOrders,
+  pruneAutoTabs,
+  putAutoTab,
+  removeAutoTabByTabId,
   setOrderNumber,
+  setRetryState,
 } from './storage';
-import { SettingsSchema, type PendingOrder } from './schemas';
+import {
+  SettingsSchema,
+  type AutoTabEntry,
+  type PendingOrder,
+  type RetryState,
+} from './schemas';
 
 /** chrome.storage.StorageArea 페이크 — set 호출 횟수도 센다(불필요한 쓰기 회피 검증용). */
 function fakeArea(initial: PendingOrder[] = []): chrome.storage.StorageArea & {
@@ -189,5 +203,128 @@ describe('listPendingOrders — area 주입 + 검증', () => {
     const got = await listPendingOrders(area);
     expect(got).toHaveLength(1);
     expect(got[0]?.id).toBe('valid');
+  });
+});
+
+/** 키가 빈 일반 fake area(retry state·auto-tab 레지스트리용). */
+function emptyArea(): chrome.storage.StorageArea & {
+  store: Record<string, unknown>;
+  setCalls: number;
+} {
+  const store: Record<string, unknown> = {};
+  const self = {
+    store,
+    setCalls: 0,
+    async get(key: string) {
+      return key in store ? { [key]: store[key] } : {};
+    },
+    async set(items: Record<string, unknown>) {
+      self.setCalls += 1;
+      Object.assign(store, items);
+    },
+    async remove(key: string) {
+      delete store[key];
+    },
+  };
+  return self as unknown as chrome.storage.StorageArea & {
+    store: Record<string, unknown>;
+    setCalls: number;
+  };
+}
+
+describe('retry state — tier-3 장기 재시도 (§1.9 후속)', () => {
+  const state = (overrides: Partial<RetryState> = {}): RetryState => ({
+    groupId: 'asobistore',
+    orderIds: ['o1'],
+    query: 'from:asobistore newer_than:1d',
+    attempts: 0,
+    firstScheduledAt: 0,
+    ...overrides,
+  });
+
+  it('setRetryState로 upsert하고 getRetryStates로 읽는다', async () => {
+    const area = emptyArea();
+    await setRetryState(state(), area);
+    expect(await getRetryStates(area)).toEqual([state()]);
+  });
+
+  it('같은 groupId는 덮어쓴다(중복 누적 없음)', async () => {
+    const area = emptyArea();
+    await setRetryState(state({ attempts: 0 }), area);
+    await setRetryState(state({ attempts: 2 }), area);
+    const got = await getRetryStates(area);
+    expect(got).toHaveLength(1);
+    expect(got[0]?.attempts).toBe(2);
+  });
+
+  it('clearRetryState로 제거, 없으면 set 호출 없음', async () => {
+    const area = emptyArea();
+    await setRetryState(state(), area);
+    const callsBefore = area.setCalls;
+    await clearRetryState('asobistore', area);
+    expect(await getRetryStates(area)).toEqual([]);
+    await clearRetryState('nope', area);
+    expect(area.setCalls).toBe(callsBefore + 1); // 두 번째 clear는 no-op
+  });
+});
+
+describe('auto-tab 레지스트리 — 자동 백필 탭 (§1.9 후속)', () => {
+  const entry = (overrides: Partial<AutoTabEntry> = {}): AutoTabEntry => ({
+    groupId: 'asobistore',
+    tabId: 42,
+    orderIds: ['o1'],
+    query: 'from:asobistore newer_than:1d',
+    openedAt: 1000,
+    ...overrides,
+  });
+
+  it('putAutoTab 후 tabId로 조회', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry(), area);
+    expect(await findAutoTabByTabId(42, area)).toEqual(entry());
+    expect(await findAutoTabByTabId(99, area)).toBeUndefined();
+  });
+
+  it('센티넬(tabId 없음)을 putAutoTab 후 tabId 부착 갱신(같은 groupId 덮어씀)', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry({ tabId: undefined }), area);
+    await putAutoTab(entry({ tabId: 7 }), area);
+    expect(await getAutoTabs(area)).toHaveLength(1);
+    expect(await findAutoTabByTabId(7, area)).toBeDefined();
+  });
+
+  it('findAutoTabByQuery는 tabId 미부착 센티넬만 매칭(SW 사망 윈도우 구제)', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry({ groupId: 'g1', tabId: undefined, query: 'q1' }), area);
+    await putAutoTab(entry({ groupId: 'g2', tabId: 5, query: 'q2' }), area);
+    expect((await findAutoTabByQuery('q1', area))?.groupId).toBe('g1');
+    expect(await findAutoTabByQuery('q2', area)).toBeUndefined(); // tabId 있으면 폴백 아님
+  });
+
+  it('removeAutoTabByTabId로 제거, 없으면 set 호출 없음', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry(), area);
+    const callsBefore = area.setCalls;
+    await removeAutoTabByTabId(42, area);
+    expect(await getAutoTabs(area)).toEqual([]);
+    await removeAutoTabByTabId(42, area);
+    expect(area.setCalls).toBe(callsBefore + 1); // 두 번째 remove는 no-op
+  });
+
+  it('pruneAutoTabs는 maxAge 초과 항목을 제거하고 그 항목들을 반환', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry({ groupId: 'old', tabId: 1, openedAt: 0 }), area);
+    await putAutoTab(entry({ groupId: 'fresh', tabId: 2, openedAt: 9000 }), area);
+    const stale = await pruneAutoTabs(10_000, 5000, area); // now=10000, maxAge=5000 → old(나이10000) 제거
+    expect(stale.map((e) => e.tabId)).toEqual([1]);
+    expect((await getAutoTabs(area)).map((e) => e.groupId)).toEqual(['fresh']);
+  });
+
+  it('pruneAutoTabs는 제거할 게 없으면 set 호출 없음·빈 배열', async () => {
+    const area = emptyArea();
+    await putAutoTab(entry({ tabId: 2, openedAt: 9000 }), area);
+    const callsBefore = area.setCalls;
+    expect(await pruneAutoTabs(10_000, 5000, area)).toEqual([]);
+    expect(area.setCalls).toBe(callsBefore);
   });
 });
