@@ -1,15 +1,15 @@
 import { saveCartSnapshot, type CartHtmlSnapshot } from '../lib/cart-html-snapshot';
+import { SWEEP_ALARM, groupIdFromAlarm } from '../lib/auto-backfill';
 import {
-  DEFAULT_RETRY_CONFIG,
-  SWEEP_ALARM,
-  alarmNameFor,
-  evaluateRetry,
-  groupIdFromAlarm,
-  planAutoTabs,
-} from '../lib/auto-backfill';
-import { buildGmailSearchUrl } from '../lib/gmail-search';
+  type AutoBackfillDeps,
+  handleAutoDone,
+  handleAutoExhausted,
+  handleRetryAlarm,
+  maybeOpenAutoTabs,
+  resolveAutoTabReady,
+  sweepOrphanTabs,
+} from '../lib/auto-backfill-orchestrator';
 import {
-  type AutoTabEntry,
   backfillOrderNumber,
   clearRetryState,
   countMissingOrderNumber,
@@ -28,11 +28,6 @@ import {
   setRetryState,
 } from '../lib/storage';
 import type { PendingOrder } from '../lib/schemas';
-
-/** 자동 백필 탭이 응답 없이 떠 있을 수 있는 최대 시간(orphan sweep 기준). */
-const AUTO_TAB_MAX_LIFETIME_MS = 60_000;
-/** tier-3 알람 간격(분) — chrome.alarms 최소 클램프(~30s~1분)보다 크게. */
-const RETRY_DELAY_MINUTES = DEFAULT_RETRY_CONFIG.intervalMs / 60_000;
 
 /**
  * 메시지 페이로드 타입.
@@ -66,6 +61,35 @@ function enqueueWrite(task: () => Promise<unknown>): void {
 }
 
 /**
+ * 오케스트레이터(lib/auto-backfill-orchestrator)에 주입할 부수효과·상태 접근 묶음.
+ * 실제 chrome.* + storage 헬퍼로 채운다(테스트는 in-memory 가짜로 대체).
+ */
+const deps: AutoBackfillDeps = {
+  now: () => Date.now(),
+  isGmailEnabled: async () => (await getSettings()).gmailOrderEmails,
+  listPending: () => listPendingOrders(),
+  getAutoTabs: () => getAutoTabs(),
+  putAutoTab: (e) => putAutoTab(e),
+  findAutoTabByTabId: (id) => findAutoTabByTabId(id),
+  findAutoTabByQuery: (q) => findAutoTabByQuery(q),
+  removeAutoTabByTabId: (id) => removeAutoTabByTabId(id),
+  pruneAutoTabs: (now, maxAge) => pruneAutoTabs(now, maxAge),
+  getRetryStates: () => getRetryStates(),
+  setRetryState: (s) => setRetryState(s),
+  clearRetryState: (g) => clearRetryState(g),
+  createTab: async (url) => (await chrome.tabs.create({ url, active: false })).id,
+  removeTab: async (id) => {
+    await chrome.tabs.remove(id);
+  },
+  createAlarm: async (name, delayMinutes) => {
+    await chrome.alarms.create(name, { delayInMinutes: delayMinutes });
+  },
+  clearAlarm: async (name) => {
+    await chrome.alarms.clear(name);
+  },
+};
+
+/**
  * 툴바 아이콘 배지에 "주문번호 미입력 후보 수"를 빨간 배지로 띄운다(§1.9 후속 — 수동 입력 유도).
  * pending_orders 변경 때마다 갱신해 메일 백필로 채워지면 자동으로 줄고, 0이면 배지를 지운다.
  * best-effort라 실패는 삼킨다(배지는 부가 안내일 뿐 데이터 정합성과 무관).
@@ -79,119 +103,6 @@ async function refreshBadge(): Promise<void> {
     }
   } catch (e) {
     console.error('[ZOAS] badge refresh failed:', e);
-  }
-}
-
-// ── 자동 백필 탭 오케스트레이션 (§1.9 후속 — background 탭 자동 열기) ──────────
-// 아래 헬퍼들은 모두 enqueueWrite 큐 *안에서* 호출된다(직렬화 보장). 직접 enqueueWrite 금지.
-
-/** 한 그룹(판매처)의 자동 백필 탭을 연다 — 이미 열린 탭이 있으면 skip. */
-async function openAutoTabForGroup(
-  groupId: string,
-  query: string,
-  orderIds: string[],
-): Promise<void> {
-  const tabs = await getAutoTabs();
-  if (tabs.some((t) => t.groupId === groupId && t.tabId !== undefined)) return;
-  const now = Date.now();
-  // 센티넬 먼저 기록(tabId 없음) → create 도중 SW가 죽어도 content script가 query로 폴백 매칭 가능.
-  await putAutoTab({ groupId, orderIds, query, openedAt: now });
-  const tab = await chrome.tabs.create({ url: buildGmailSearchUrl(query), active: false });
-  if (tab.id !== undefined) {
-    await putAutoTab({ groupId, orderIds, query, openedAt: now, tabId: tab.id });
-  }
-}
-
-/** 설정 ON + 미백필 후보가 있을 때만, 판매처별로 자동 백필 탭을 연다(결제 직후 tier-1). */
-async function maybeOpenAutoTabs(): Promise<void> {
-  const settings = await getSettings();
-  if (!settings.gmailOrderEmails) return;
-  const plans = planAutoTabs(await listPendingOrders());
-  for (const plan of plans) {
-    await openAutoTabForGroup(plan.groupId, plan.query, plan.orderIds);
-  }
-}
-
-/** 레지스트리에서 빼고 실제 탭도 닫는다(best-effort). */
-async function closeAndForget(tabId: number): Promise<void> {
-  await removeAutoTabByTabId(tabId);
-  try {
-    await chrome.tabs.remove(tabId);
-  } catch {
-    /* 이미 닫혔거나 사용자가 닫음 — 무해 */
-  }
-}
-
-/** orderIds 중 아직 orderNumber가 빈(=미백필) 것만 추린다. */
-function stillMissingOf(orderIds: string[], pending: PendingOrder[]): string[] {
-  return orderIds.filter((id) => {
-    const o = pending.find((p) => p.id === id);
-    return o !== undefined && !o.orderNumber;
-  });
-}
-
-/** tier-1/2 성공: 탭 닫고 그룹의 tier-3 상태·알람을 정리. */
-async function handleAutoDone(tabId: number): Promise<void> {
-  const entry = await findAutoTabByTabId(tabId);
-  await closeAndForget(tabId);
-  if (!entry) return;
-  await clearRetryState(entry.groupId);
-  await chrome.alarms.clear(alarmNameFor(entry.groupId));
-}
-
-/** tier-1/2 소진: 탭 닫고, 여전히 미백필이면 tier-3(알람) 시작(이미 진행 중이면 유지). */
-async function handleAutoExhausted(tabId: number): Promise<void> {
-  const entry = await findAutoTabByTabId(tabId);
-  await closeAndForget(tabId);
-  if (!entry) return;
-  const settings = await getSettings();
-  if (!settings.gmailOrderEmails) return;
-
-  const missing = stillMissingOf(entry.orderIds, await listPendingOrders());
-  if (missing.length === 0) return;
-
-  const states = await getRetryStates();
-  if (states.some((s) => s.groupId === entry.groupId)) return; // 이미 tier-3 진행 중
-
-  await setRetryState({
-    groupId: entry.groupId,
-    orderIds: missing,
-    query: entry.query,
-    attempts: 0,
-    firstScheduledAt: Date.now(),
-  });
-  await chrome.alarms.create(alarmNameFor(entry.groupId), { delayInMinutes: RETRY_DELAY_MINUTES });
-}
-
-/** tier-3 알람 발화: 상태·후보 재평가 후 재시도(탭 재오픈)하거나 포기. */
-async function handleRetryAlarm(groupId: string): Promise<void> {
-  const state = (await getRetryStates()).find((s) => s.groupId === groupId);
-  if (!state) {
-    await chrome.alarms.clear(alarmNameFor(groupId));
-    return;
-  }
-  const missing = stillMissingOf(state.orderIds, await listPendingOrders());
-  const decision = evaluateRetry(state, missing, Date.now());
-  if (decision.action !== 'retry') {
-    await clearRetryState(groupId);
-    await chrome.alarms.clear(alarmNameFor(groupId));
-    return;
-  }
-  await openAutoTabForGroup(groupId, state.query, missing);
-  await setRetryState({ ...state, orderIds: missing, attempts: state.attempts + 1 });
-  await chrome.alarms.create(alarmNameFor(groupId), { delayInMinutes: RETRY_DELAY_MINUTES });
-}
-
-/** maxLifetime 초과 orphan 탭(미로그인·미응답)을 닫고 레지스트리에서 청소(주기 sweep). */
-async function sweepOrphanTabs(): Promise<void> {
-  const stale: AutoTabEntry[] = await pruneAutoTabs(Date.now(), AUTO_TAB_MAX_LIFETIME_MS);
-  for (const e of stale) {
-    if (e.tabId === undefined) continue;
-    try {
-      await chrome.tabs.remove(e.tabId);
-    } catch {
-      /* 이미 닫힘 */
-    }
   }
 }
 
@@ -220,11 +131,11 @@ export default defineBackground(() => {
   // tier-3 재시도 알람 + orphan sweep 알람.
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === SWEEP_ALARM) {
-      void sweepOrphanTabs();
+      void sweepOrphanTabs(deps);
       return;
     }
     const groupId = groupIdFromAlarm(alarm.name);
-    if (groupId) enqueueWrite(() => handleRetryAlarm(groupId));
+    if (groupId) enqueueWrite(() => handleRetryAlarm(deps, groupId));
   });
 
   // 사용자가 자동 탭을 직접 닫았을 때 레지스트리 정합(고아 항목 방지).
@@ -250,7 +161,7 @@ export default defineBackground(() => {
         enqueueWrite(() =>
           savePendingOrder(msg.payload)
             .then(() => prunePendingOrders())
-            .then(() => maybeOpenAutoTabs()),
+            .then(() => maybeOpenAutoTabs(deps)),
         );
         return false;
       case 'ORDER_BACKFILL':
@@ -271,29 +182,21 @@ export default defineBackground(() => {
           return false;
         }
         void (async () => {
-          let entry = await findAutoTabByTabId(tabId);
-          // SW 사망 윈도우: tabId 미부착 센티넬을 검색 쿼리로 폴백 매칭하고 tabId를 부착.
-          if (!entry && msg.query) {
-            const sentinel = await findAutoTabByQuery(msg.query);
-            if (sentinel) {
-              entry = { ...sentinel, tabId };
-              enqueueWrite(() => putAutoTab(entry as AutoTabEntry));
-            }
-          }
-          sendResponse(
-            entry ? { auto: true, orderIds: entry.orderIds, query: entry.query } : { auto: false },
-          );
+          const { response, attach } = await resolveAutoTabReady(deps, tabId, msg.query);
+          // tabId 부착은 단일 쓰기 주체(직렬 큐)로 — 응답은 즉시.
+          if (attach) enqueueWrite(() => putAutoTab(attach));
+          sendResponse(response);
         })();
         return true; // 비동기 응답
       }
       case 'AUTO_BACKFILL_DONE': {
         const tabId = sender.tab?.id;
-        if (tabId !== undefined) enqueueWrite(() => handleAutoDone(tabId));
+        if (tabId !== undefined) enqueueWrite(() => handleAutoDone(deps, tabId));
         return false;
       }
       case 'AUTO_BACKFILL_EXHAUSTED': {
         const tabId = sender.tab?.id;
-        if (tabId !== undefined) enqueueWrite(() => handleAutoExhausted(tabId));
+        if (tabId !== undefined) enqueueWrite(() => handleAutoExhausted(deps, tabId));
         return false;
       }
       default:
