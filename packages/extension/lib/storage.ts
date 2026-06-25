@@ -1,14 +1,22 @@
 import {
+  AutoTabEntrySchema,
   PendingOrderSchema,
+  RetryStateSchema,
   SettingsSchema,
+  type AutoTabEntry,
   type PendingOrder,
+  type RetryState,
   type Settings,
 } from './schemas';
 
-export type { PendingOrder, Settings };
+export type { AutoTabEntry, PendingOrder, RetryState, Settings };
 
 const KEY_ORDERS = 'pending_orders';
 const KEY_SETTINGS = 'settings';
+/** tier-3 재시도 상태(local 영속, chrome.alarms와 수명 정렬). */
+const KEY_RETRY = 'autobackfill_retry';
+/** 자동 백필 탭 레지스트리(session, 브라우저 세션 동안만). */
+const KEY_AUTOTABS = 'autobackfill_tabs';
 
 type Area = chrome.storage.StorageArea;
 
@@ -123,4 +131,110 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(settings: Settings): Promise<void> {
   const validated = SettingsSchema.parse(settings);
   await chrome.storage.local.set({ [KEY_SETTINGS]: validated });
+}
+
+// ── tier-3 재시도 상태 (§1.9 후속 — 자동 백필 탭) ──────────────────────────────
+// background 단일 쓰기 주체에서만 호출(알람 핸들러·메시지). groupId당 한 항목.
+
+function parseRetryStates(raw: unknown): RetryState[] {
+  return ((raw as unknown[] | undefined) ?? [])
+    .map((item) => RetryStateSchema.safeParse(item))
+    .filter((r) => r.success)
+    .map((r) => (r as { success: true; data: RetryState }).data);
+}
+
+export async function getRetryStates(area: Area = chrome.storage.local): Promise<RetryState[]> {
+  const raw = await area.get(KEY_RETRY);
+  return parseRetryStates(raw[KEY_RETRY]);
+}
+
+/** groupId 키로 재시도 상태를 upsert. */
+export async function setRetryState(
+  state: RetryState,
+  area: Area = chrome.storage.local,
+): Promise<void> {
+  const validated = RetryStateSchema.parse(state);
+  const existing = await getRetryStates(area);
+  const next = [...existing.filter((s) => s.groupId !== validated.groupId), validated];
+  await area.set({ [KEY_RETRY]: next });
+}
+
+/** groupId의 재시도 상태를 제거. 없으면 no-op(불필요한 쓰기 회피). */
+export async function clearRetryState(
+  groupId: string,
+  area: Area = chrome.storage.local,
+): Promise<void> {
+  const existing = await getRetryStates(area);
+  const next = existing.filter((s) => s.groupId !== groupId);
+  if (next.length === existing.length) return;
+  await area.set({ [KEY_RETRY]: next });
+}
+
+// ── 자동 백필 탭 레지스트리 (§1.9 후속) ───────────────────────────────────────
+// session 영역에 저장(SW 재시작 견딤, 브라우저 종료 시 소멸). background에서만 쓴다.
+
+function parseAutoTabs(raw: unknown): AutoTabEntry[] {
+  return ((raw as unknown[] | undefined) ?? [])
+    .map((item) => AutoTabEntrySchema.safeParse(item))
+    .filter((r) => r.success)
+    .map((r) => (r as { success: true; data: AutoTabEntry }).data);
+}
+
+export async function getAutoTabs(area: Area = chrome.storage.session): Promise<AutoTabEntry[]> {
+  const raw = await area.get(KEY_AUTOTABS);
+  return parseAutoTabs(raw[KEY_AUTOTABS]);
+}
+
+/** groupId 키로 레지스트리 항목을 upsert(센티넬 기록 후 tabId 부착 갱신에 같이 쓴다). */
+export async function putAutoTab(
+  entry: AutoTabEntry,
+  area: Area = chrome.storage.session,
+): Promise<void> {
+  const validated = AutoTabEntrySchema.parse(entry);
+  const existing = await getAutoTabs(area);
+  const next = [...existing.filter((e) => e.groupId !== validated.groupId), validated];
+  await area.set({ [KEY_AUTOTABS]: next });
+}
+
+export async function findAutoTabByTabId(
+  tabId: number,
+  area: Area = chrome.storage.session,
+): Promise<AutoTabEntry | undefined> {
+  return (await getAutoTabs(area)).find((e) => e.tabId === tabId);
+}
+
+/** tabId 미부착(센티넬) 항목을 검색 쿼리로 폴백 매칭 — SW 사망 윈도우의 orphan 핸드셰이크 구제용. */
+export async function findAutoTabByQuery(
+  query: string,
+  area: Area = chrome.storage.session,
+): Promise<AutoTabEntry | undefined> {
+  return (await getAutoTabs(area)).find((e) => e.tabId === undefined && e.query === query);
+}
+
+/** tabId로 레지스트리 항목 제거. 없으면 no-op. */
+export async function removeAutoTabByTabId(
+  tabId: number,
+  area: Area = chrome.storage.session,
+): Promise<void> {
+  const existing = await getAutoTabs(area);
+  const next = existing.filter((e) => e.tabId !== tabId);
+  if (next.length === existing.length) return;
+  await area.set({ [KEY_AUTOTABS]: next });
+}
+
+/**
+ * openedAt이 maxAgeMs를 넘긴 orphan 레지스트리 항목을 제거하고, **제거된 항목들을 반환**한다
+ * (호출측 background가 그 tabId 탭을 실제로 닫게). 미응답 탭(미로그인 리다이렉트 등)·SW 사망으로
+ * 남은 센티넬을 주기 sweep으로 청소. 변경 없으면 set 호출 없음.
+ */
+export async function pruneAutoTabs(
+  now: number,
+  maxAgeMs: number,
+  area: Area = chrome.storage.session,
+): Promise<AutoTabEntry[]> {
+  const existing = await getAutoTabs(area);
+  const stale = existing.filter((e) => now - e.openedAt > maxAgeMs);
+  if (stale.length === 0) return [];
+  await area.set({ [KEY_AUTOTABS]: existing.filter((e) => now - e.openedAt <= maxAgeMs) });
+  return stale;
 }

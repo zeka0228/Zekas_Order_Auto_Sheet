@@ -11,7 +11,7 @@ export default defineConfig({
     description:
       '해외 직구 결제 정보를 자동 캡처해 배대지 주문서를 채워주는 확장.',
     version: '0.0.1',
-    permissions: ['storage', 'activeTab', 'scripting'],
+    permissions: ['storage', 'activeTab', 'scripting', 'alarms'],
     host_permissions: ['<all_urls>'],
     action: {
       default_title: 'Zekas Order Auto Sheet',
