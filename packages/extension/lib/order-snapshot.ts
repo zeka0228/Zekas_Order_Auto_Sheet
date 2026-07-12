@@ -35,3 +35,35 @@ export function buildPendingOrder(args: {
     needsHumanReview,
   });
 }
+
+/**
+ * 사용자가 popup에서 직접 입력한 주문 정보로 PendingOrder를 조립한다(source: 'manual').
+ * 결제 자동 캡처가 실패했거나 캡처 대상이 아닌 주문을 손으로 넣어 배대지 폼 채움에 쓰기 위함.
+ * 상품명은 필수(호출측에서 보장), 금액·통화·주문번호는 선택. 가격이 없으면 needsHumanReview.
+ */
+export function buildManualOrder(args: {
+  id: string;
+  productName: string;
+  amount?: number;
+  currency?: string;
+  orderNumber?: string;
+  now?: number;
+}): PendingOrder {
+  const name = args.productName.trim();
+  const price =
+    args.amount != null && Number.isFinite(args.amount) && args.currency
+      ? { amount: args.amount, currency: args.currency }
+      : undefined;
+  const orderNumber = args.orderNumber?.trim() || undefined;
+  return PendingOrderSchema.parse({
+    id: args.id,
+    domain: 'manual',
+    url: '',
+    capturedAt: args.now ?? Date.now(),
+    source: 'manual',
+    orderNumber,
+    productName: name || undefined,
+    price,
+    needsHumanReview: !(name && price),
+  });
+}

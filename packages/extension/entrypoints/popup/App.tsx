@@ -15,6 +15,14 @@ export function App() {
   const [scan, setScan] = useState<ScanState>('idle');
   // 미입력 주문별 입력 초안(id → 입력 중 문자열). 저장하면 비운다.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // "주문 직접 추가" 폼 표시 여부 + 입력값.
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({
+    productName: '',
+    amount: '',
+    currency: 'JPY',
+    orderNumber: '',
+  });
 
   useEffect(() => {
     listPendingOrders().then(setOrders);
@@ -63,6 +71,26 @@ export function App() {
     });
   }
 
+  // 주문 직접 추가 — 결제 자동 캡처가 없던 주문을 손으로 저장(source: 'manual').
+  // 저장은 background(단일 쓰기 주체)로 보내고, 목록은 storage.onChanged로 갱신된다.
+  function addManualOrder() {
+    const productName = form.productName.trim();
+    if (!productName) return;
+    const amountNum = form.amount.trim() ? Number(form.amount) : undefined;
+    const hasAmount = amountNum != null && Number.isFinite(amountNum);
+    chrome.runtime.sendMessage({
+      type: 'ORDER_ADD_MANUAL',
+      payload: {
+        productName,
+        amount: hasAmount ? amountNum : undefined,
+        currency: hasAmount ? form.currency : undefined,
+        orderNumber: form.orderNumber.trim() || undefined,
+      },
+    });
+    setForm({ productName: '', amount: '', currency: 'JPY', orderNumber: '' });
+    setShowAdd(false);
+  }
+
   const missingCount = orders.filter((o) => !o.orderNumber).length;
   // 미입력(주문번호 못 가져옴) 주문을 위로 — 사용자가 바로 처리하도록.
   const sorted = [...orders].sort(
@@ -102,10 +130,63 @@ export function App() {
       )}
 
       <section>
-        <h2 className="font-medium mb-2">대기 중인 주문 ({orders.length})</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-medium">대기 중인 주문 ({orders.length})</h2>
+          <button
+            className="text-xs text-blue-600 hover:underline"
+            onClick={() => setShowAdd((v) => !v)}
+          >
+            {showAdd ? '취소' : '+ 직접 추가'}
+          </button>
+        </div>
+
+        {showAdd && (
+          <div className="mb-3 rounded border border-gray-200 p-2.5 space-y-1.5">
+            <input
+              className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs"
+              placeholder="상품명 (필수)"
+              value={form.productName}
+              onChange={(e) => setForm({ ...form, productName: e.target.value })}
+            />
+            <div className="flex gap-1">
+              <input
+                className="flex-1 min-w-0 rounded border border-gray-300 px-1.5 py-1 text-xs"
+                placeholder="금액"
+                inputMode="decimal"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              />
+              <select
+                className="shrink-0 rounded border border-gray-300 px-1 py-1 text-xs"
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+              >
+                {['JPY', 'USD', 'CNY', 'KRW', 'EUR', 'GBP'].map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <input
+              className="w-full rounded border border-gray-300 px-1.5 py-1 font-mono text-xs"
+              placeholder="주문번호 (선택)"
+              value={form.orderNumber}
+              onChange={(e) => setForm({ ...form, orderNumber: e.target.value })}
+            />
+            <button
+              className="w-full rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              onClick={addManualOrder}
+              disabled={!form.productName.trim()}
+            >
+              주문 저장
+            </button>
+          </div>
+        )}
+
         {orders.length === 0 ? (
           <p className="text-gray-500 text-xs">
-            쇼핑몰 결제 완료 페이지를 방문하면 자동으로 캡처됩니다.
+            쇼핑몰 결제 시 자동으로 캡처됩니다. 위 <b>+ 직접 추가</b>로 손수 넣을 수도 있어요.
           </p>
         ) : (
           <ul className="space-y-1.5">

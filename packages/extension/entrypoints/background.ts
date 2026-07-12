@@ -27,7 +27,16 @@ import {
   setOrderNumber,
   setRetryState,
 } from '../lib/storage';
+import { buildManualOrder } from '../lib/order-snapshot';
 import type { PendingOrder } from '../lib/schemas';
+
+/** popup 직접 추가 폼에서 오는 주문 입력. */
+type ManualOrderInput = {
+  productName: string;
+  amount?: number;
+  currency?: string;
+  orderNumber?: string;
+};
 
 /**
  * 메시지 페이로드 타입.
@@ -41,6 +50,7 @@ type RuntimeMessage =
   | { type: 'PENDING_ORDER'; payload: PendingOrder }
   | { type: 'ORDER_BACKFILL'; payload: { orderId: string; orderNumber: string } }
   | { type: 'ORDER_SET_NUMBER'; payload: { orderId: string; orderNumber: string } }
+  | { type: 'ORDER_ADD_MANUAL'; payload: ManualOrderInput }
   // 자동 백필 탭(§1.9 후속): content script가 시작 시 자신이 auto 탭인지 묻고(응답 필요),
   // tier-1/2 결과를 알린다(성공 DONE / 15초 소진 EXHAUSTED).
   | { type: 'AUTO_TAB_READY'; query?: string }
@@ -172,6 +182,13 @@ export default defineBackground(() => {
         // popup에서 사용자가 직접 입력한 orderNumber를 후보에 설정(§1.9 후속, regex 백필 실패 시).
         // 배지·UI는 storage.onChanged로 자동 갱신되므로 여기선 쓰기만 큐에 넣는다.
         enqueueWrite(() => setOrderNumber(msg.payload.orderId, msg.payload.orderNumber));
+        return false;
+      case 'ORDER_ADD_MANUAL':
+        // popup "주문 직접 추가" — 결제 자동 캡처가 없던 주문을 손으로 넣어 배대지 폼 채움에 쓴다.
+        // id·capturedAt는 단일 쓰기 주체(background)에서 생성해 저장. UI는 storage.onChanged로 갱신.
+        enqueueWrite(() =>
+          savePendingOrder(buildManualOrder({ id: crypto.randomUUID(), ...msg.payload })),
+        );
         return false;
       case 'AUTO_TAB_READY': {
         // content script가 자신이 자동 백필 탭인지 묻는다 → sender.tab.id로 레지스트리 조회해 응답.
