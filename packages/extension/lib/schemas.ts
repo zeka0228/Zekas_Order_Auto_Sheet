@@ -46,6 +46,12 @@ export const SettingsSchema = z.object({
    * 돌리지 않고 주문번호는 popup 수동 입력에 의존한다.
    */
   gmailOrderEmails: z.boolean().default(false),
+  /**
+   * 사용자가 등록한 배송대행지(배대지) 도메인 목록. 배대지는 개인당 사실상 고정 1개라
+   * 쇼핑몰처럼 휴리스틱으로 매번 추정하기보다 등록 도메인에서만 폼 자동 채움을 활성화한다
+   * (Phase 4 — 오탐 0). 비면 배대지 폼 채움이 어느 사이트에서도 동작하지 않는다.
+   */
+  baedaejiDomains: z.array(z.string()).default([]),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

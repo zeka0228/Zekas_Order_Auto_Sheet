@@ -193,6 +193,13 @@ describe('SettingsSchema — 온보딩/Gmail 기본값', () => {
     expect(s.onboarded).toBe(true);
     expect(s.gmailOrderEmails).toBe(true);
   });
+
+  it('배대지 도메인은 기본 빈 배열, 등록값 보존', () => {
+    expect(SettingsSchema.parse({}).baedaejiDomains).toEqual([]);
+    expect(
+      SettingsSchema.parse({ baedaejiDomains: ['malltail.com'] }).baedaejiDomains,
+    ).toEqual(['malltail.com']);
+  });
 });
 
 describe('listPendingOrders — area 주입 + 검증', () => {

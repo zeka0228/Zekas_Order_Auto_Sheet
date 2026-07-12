@@ -1,7 +1,7 @@
 import { getCachedConfig, generateConfig } from '../lib/config-client';
 import { sanitizeHTML } from '../lib/html-masker';
-import { listPendingOrders } from '../lib/storage';
-import { looksLikeBaedaejiForm } from '../lib/baedaeji-gate';
+import { listPendingOrders, getSettings } from '../lib/storage';
+import { shouldActivateBaedaeji } from '../lib/baedaeji-gate';
 import { fillOrderIntoForm } from '../lib/baedaeji-fill';
 import { renderBaedaejiPanel } from '../lib/baedaeji-panel';
 import { showScanNotification } from '../lib/scan-notification';
@@ -12,7 +12,8 @@ import type { PendingOrder } from '../lib/schemas';
  * 배대지 주문서 폼 자동 채움 (Phase 4).
  *
  * 흐름:
- *   1) 값싼 게이트로 배대지 주문서 폼 페이지인지 확인 (looksLikeBaedaejiForm)
+ *   1) 사용자 등록 배대지 도메인 + 채울 수 있는 폼이 있는 페이지인지 확인 (shouldActivateBaedaeji).
+ *      배대지는 개인당 고정 1개라 등록 도메인에서만 활성화 → 오탐 0.
  *   2) 캡처된 pending order가 있으면 우상단 선택 패널 주입
  *   3) 사용자가 "채우기"를 누르면 그때 config 확보(캐시 → 없으면 AI 생성) 후 폼에 값 주입
  *   4) **자동 제출은 절대 하지 않는다** — 값만 채우고 검토·제출은 사용자 손에 맡긴다(명세서 §8).
@@ -24,7 +25,15 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   async main() {
-    if (!looksLikeBaedaejiForm(document, location.href)) return;
+    const { baedaejiDomains } = await getSettings();
+    if (
+      !shouldActivateBaedaeji({
+        host: location.hostname,
+        doc: document,
+        registeredDomains: baedaejiDomains,
+      })
+    )
+      return;
 
     const orders = await listPendingOrders();
     if (orders.length === 0) return; // 채울 주문이 없으면 조용히 종료 — 패널 미주입

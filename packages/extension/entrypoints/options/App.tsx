@@ -8,6 +8,7 @@ import {
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [newDomain, setNewDomain] = useState('');
 
   useEffect(() => {
     getSettings().then(setSettings);
@@ -20,6 +21,27 @@ export function App() {
     const next: Settings = { ...settings!, gmailOrderEmails: uses, onboarded: true };
     await saveSettings(next);
     setSettings(next);
+  }
+
+  function addBaedaejiDomain() {
+    const d = newDomain.trim().toLowerCase();
+    if (!d) return;
+    if (settings!.baedaejiDomains.includes(d)) {
+      setNewDomain('');
+      return;
+    }
+    setSettings({
+      ...settings!,
+      baedaejiDomains: [...settings!.baedaejiDomains, d],
+    });
+    setNewDomain('');
+  }
+
+  function removeBaedaejiDomain(domain: string) {
+    setSettings({
+      ...settings!,
+      baedaejiDomains: settings!.baedaejiDomains.filter((d) => d !== domain),
+    });
   }
 
   // ── 온보딩: 처음 등록 시 Gmail 사용 여부를 묻는다 ──
@@ -79,6 +101,53 @@ export function App() {
             ? 'Gmail에서 주문확인 메일을 열면 주문번호를 자동으로 채웁니다.'
             : '꺼져 있습니다. 주문번호는 결제 후 팝업에서 직접 입력하세요. (변경 후 Gmail 탭을 새로고침해야 반영됩니다.)'}
         </p>
+      </section>
+
+      <section className="border rounded-md p-4 mb-4">
+        <h2 className="font-medium mb-2">배대지(배송대행지) 자동 채움</h2>
+        <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+          사용하시는 배송대행지 도메인을 등록하세요. 등록한 사이트의 주문서 폼에서만
+          캡처된 주문 정보를 자동으로 채워 드립니다. (예: <code>malltail.com</code>)
+        </p>
+        <div className="flex gap-2 mb-2">
+          <input
+            type="text"
+            placeholder="malltail.com"
+            value={newDomain}
+            onChange={(e) => setNewDomain(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') addBaedaejiDomain();
+            }}
+            className="flex-1 border rounded px-2 py-1 text-xs"
+          />
+          <button
+            onClick={addBaedaejiDomain}
+            className="rounded bg-blue-600 px-3 py-1 text-white text-xs hover:bg-blue-700"
+          >
+            추가
+          </button>
+        </div>
+        {settings.baedaejiDomains.length === 0 ? (
+          <p className="text-xs text-gray-400">등록된 배대지가 없습니다.</p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {settings.baedaejiDomains.map((d) => (
+              <li
+                key={d}
+                className="flex items-center justify-between border rounded px-2 py-1 text-xs"
+              >
+                <span className="font-mono">{d}</span>
+                <button
+                  onClick={() => removeBaedaejiDomain(d)}
+                  className="text-red-600 hover:underline"
+                  aria-label={`${d} 삭제`}
+                >
+                  삭제
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="border rounded-md p-4 mb-4">
